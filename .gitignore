@@ -1,0 +1,11 @@
+target/
+.bsp/
+.idea
+.DS_Store
+.metals/
+.vscode/
+.bloop/
+metals.sbt
+.scala-build
+src/test/scala/generated
+.bin

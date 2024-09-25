@@ -1,3 +1,5 @@
+import GeneratorConfig.*
+
 import java.nio.file.*
 import upickle.default.*
 import GeneratorConfig.*
@@ -511,6 +513,7 @@ enum SchemaType(val optional: Boolean):
     case Primitive("string", _, _)                         => toType("String")
     case Primitive("integer", _, Some("int32" | "uint32")) => toType("Int")
     case Primitive("integer", _, Some("int64" | "uint64")) => toType("Long")
+    case Primitive("number", _, Some("double" | "float"))  => toType("Double")
     case Primitive("boolean", _, _)                        => toType("Boolean")
     case Ref(ref, _)                                       => toType(ref.scalaName)
     case Array(t, _)                                       => toType(s"List[${t.scalaType}]")

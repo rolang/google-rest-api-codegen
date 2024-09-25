@@ -8,17 +8,7 @@ import java.io.File
 import scala.util.{Failure, Success}
 import scala.jdk.CollectionConverters.*
 
-// usage example
-// curl "https://pubsub.googleapis.com/\$discovery/rest?version=v1" | ./codegen \
-//  --out-dir=src/main/scala \
-//  --specs=stdin \
-//  --resources-pkg=gcp.pubsub.v1.resources.sttp4 \
-//  --schemas-pkg=gcp.pubsub.v1.schemas \
-//  --http-source=sttp4 \
-//  --json-codec=ziojson
-//  --include-resources='projects.*,!projects*snapshots'
-
-@main def run(args: String*) = {
+@main def run(args: String*) =
   argsToTask(args) match
     case Left(err) => Console.err.println(s"Invalid arguments: $err")
     case Right(task) =>
@@ -42,7 +32,6 @@ import scala.jdk.CollectionConverters.*
             println(s"Failure: ${exception.printStackTrace()}")
           case Success(_) => ()
         }
-}
 
 extension (p: Path)
   def /(o: Path) = Path.of(p.toString(), o.toString())
@@ -147,7 +136,8 @@ def generateBySpec(
           Future
             .traverse(specs.resources) { (resourceKey, resource) =>
               val resourceName = resourceKey.scalaName
-
+              println(s"resourcesPath: $resourcesPath")
+              println(s"resourceName: $resourceName")
               Future {
                 val code = resourceCode(
                   pkg = resourceKey.pkgName(config.resourcesPkg),
@@ -160,6 +150,7 @@ def generateBySpec(
                   hasProps = p => specs.hasProps(p)
                 )
                 val path = resourceKey.dirPath(resourcesPath) / s"$resourceName.scala"
+                println(s"path: $path")
                 Files.writeString(path, code)
                 path.toFile()
               }
@@ -214,15 +205,14 @@ def mapSpecs(specs: Specs): Specs = {
     case (k @ "PublishRequest", pr) =>
       Map(
         SchemaPath(k) -> pr.copy(
-          properties = pr.properties
-            .map {
-              case (k @ "messages", v) =>
-                (
-                  k,
-                  v.copy(typ = SchemaType.Array(SchemaType.Ref(newSchemaId, false), false))
-                )
-              case kv => kv
-            }
+          properties = pr.properties.map {
+            case (k @ "messages", v) =>
+              (
+                k,
+                v.copy(typ = SchemaType.Array(SchemaType.Ref(newSchemaId, false), false))
+              )
+            case kv => kv
+          }
         )
       )
     case (k, v) => Map(SchemaPath(k) -> v)
@@ -240,7 +230,7 @@ def resourceCode(
     httpSource: HttpSource,
     jsonCodec: JsonCodec,
     hasProps: SchemaPath => Boolean
-) = {
+) =
   List(
     s"package $pkg",
     "",
@@ -307,14 +297,13 @@ def resourceCode(
             case _ => (responseType("String"), "")
 
           s"""|def ${k}(${params.mkString(",\n")}): $resType = {$queryParams
-              |  basicRequest.${v.httpMethod
+            |  basicRequest.${v.httpMethod
                .toLowerCase()}(uri"$reqUri"$addParams)$body$mapResponse
-              |}""".stripMargin
+            |}""".stripMargin
         }
         .mkString("\n", "\n\n", "\n") +
       "}"
   ).mkString("\n")
-}
 
 /* plain scala json encoder impl
 def toJsonStrPair(
@@ -387,8 +376,10 @@ def schemasCode(
 
       s"""|case class $scalaName(
           |${v
-           .scalaProperties(hasProps)
-           .map((n, t) => s"$n: $t")
+           .sortedProps(hasProps)
+           .map { (n, t) =>
+             s"${toScalaName(n)}: " + (if (t.typ.optional) s"${t.scalaType} = None" else t.scalaType)
+           }
            .mkString("    ", ",\n    ", "")}
           |) {\n  ${`def toJsonString`}\n}
           |
@@ -522,7 +513,7 @@ enum SchemaType(val optional: Boolean):
     case Primitive("integer", _, Some("int64" | "uint64")) => toType("Long")
     case Primitive("boolean", _, _)                        => toType("Boolean")
     case Ref(ref, _)                                       => toType(ref.scalaName)
-    case Array(t, _)                                       => toType(s"IndexedSeq[${t.scalaType}]")
+    case Array(t, _)                                       => toType(s"List[${t.scalaType}]")
     case Object(t, _)                                      => toType(s"Map[String, ${t.scalaType}]")
     case _                                                 => toType("String")
 
@@ -646,7 +637,7 @@ object ResourcePath:
   extension (r: ResourcePath)
     def add(p: String): ResourcePath = r :+ p
     def scalaName: String = r.last.capitalize
-    def pkgPath: Vector[String] = r.dropRight(1)
+    def pkgPath: Vector[String] = r.dropRight(1).map(camelToSnakeCase)
     def pkgName(base: String): String = s"$base${if pkgPath.nonEmpty then pkgPath.mkString(".", ".", "") else ""}"
     def dirPath(base: Path): Path = base / pkgPath
     def matches(v: String): Boolean =
@@ -667,6 +658,11 @@ case class Specs(
 ) {
   def hasProps(schemaName: SchemaPath) =
     schemas.get(schemaName).exists(_.properties.nonEmpty)
+}
+
+def camelToSnakeCase(camelCase: String): String = {
+  val camelCaseRegex = "([A-Z][a-z]+)".r
+  camelCaseRegex.replaceAllIn(camelCase, matched => "_" + matched.group(0).toLowerCase)
 }
 
 object Specs:

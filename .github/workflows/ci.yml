@@ -20,4 +20,6 @@ jobs:
         with:
           path: ./.bin
           key: cli-build
+      - name: Start up emulators
+        run: docker compose up -d 
       - run: ./test.sh

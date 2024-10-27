@@ -5,7 +5,7 @@ import scala.concurrent.{Future, Await}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.*
 import java.io.File
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 import scala.jdk.CollectionConverters.*
 
 // usage example
@@ -64,7 +64,7 @@ object GeneratorConfig:
     case Sttp4, Sttp3
 
   enum JsonCodec:
-    case ZioJson
+    case ZioJson, Jsoniter
 
 enum SpecsInput:
   case StdIn
@@ -144,6 +144,24 @@ def generateBySpec(
     files <- Future
       .sequence(
         List(
+          Future {
+            val path = resourcesPath / "resources.scala"
+            Files.writeString(
+              path,
+              List(
+                s"package ${config.resourcesPkg}",
+                "",
+                config.httpSource match {
+                  case HttpSource.Sttp4 => "import sttp.model.*\nimport sttp.client4.*"
+                  case HttpSource.Sttp3 => "import sttp.model.*\nimport sttp.client3.*"
+                },
+                "",
+                "val resourceRequest: PartialRequest[Either[String, String]] = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
+                s"""val resourceBaseUrl: Uri = uri"${specs.baseUrl}""""
+              ).mkString("\n")
+            )
+            List(path.toFile())
+          },
           Future
             .traverse(specs.resources) { (resourceKey, resource) =>
               val resourceName = resourceKey.scalaName
@@ -151,6 +169,7 @@ def generateBySpec(
               Future {
                 val code = resourceCode(
                   pkg = resourceKey.pkgName(config.resourcesPkg),
+                  resourcesPkg = config.resourcesPkg,
                   schemasPkg = config.schemasPkg,
                   baseUrl = specs.baseUrl,
                   resourceName = resourceName,
@@ -185,7 +204,7 @@ def generateBySpec(
   } yield files
 }
 
-val scalaKeyWords = Set("type", "import", "val", "object", "enum")
+val scalaKeyWords = Set("type", "import", "val", "object", "enum", "export")
 
 def toScalaName(n: String): String =
   if scalaKeyWords.contains(n) then s"`$n`"
@@ -233,6 +252,7 @@ def mapSpecs(specs: Specs): Specs = {
 
 def resourceCode(
     pkg: String,
+    resourcesPkg: String,
     schemasPkg: String,
     baseUrl: String,
     resourceName: String,
@@ -245,29 +265,39 @@ def resourceCode(
     s"package $pkg",
     "",
     s"import $schemasPkg.*",
+    s"import $resourcesPkg.*",
     "",
     httpSource match {
-      case HttpSource.Sttp4 => "import sttp.client4.*"
-      case HttpSource.Sttp3 => "import sttp.client3.*"
+      case HttpSource.Sttp4 => "import sttp.model.*\nimport sttp.client4.*"
+      case HttpSource.Sttp3 => "import sttp.model.*\nimport sttp.client3.*"
     },
     jsonCodec match {
-      case JsonCodec.ZioJson => "import zio.json.*"
+      case JsonCodec.ZioJson  => "import zio.json.*"
+      case JsonCodec.Jsoniter => "import com.github.plokhotnyuk.jsoniter_scala.core.*"
     },
     "",
     s"object ${resourceName} {" +
       resource.methods
         .map { (k, v) =>
+          val pathSegments =
+            v.urlPath
+              .split("/")
+              .map(s =>
+                "\\{(.*?)\\}".r.findAllIn(s).toList match
+                  case Nil                => s"\"$s\""
+                  case v :: Nil if v == s => toScalaName(v.stripPrefix("{").stripSuffix("}"))
+                  case vars =>
+                    "s\"" + vars.foldLeft(s)((res, v) =>
+                      res.replace(v, "$" + v.stripPrefix("{").stripSuffix("}"))
+                    ) + "\""
+              )
 
-          val reqUri =
-            v.scalaPathParams.foldLeft(baseUrl + v.path) { (u, paramName) =>
-              u.replace(s"{+$paramName}", s"$$$paramName")
-                .replace(s"{$paramName}", s"$$$paramName")
-            }
+          val reqUri = s"resourceBaseUrl.addPath(${pathSegments.mkString(", ")})"
 
           val req = v.request.filter(_.schemaPath.forall(hasProps))
 
           val params =
-            v.scalaParameters.map((n, t) => s"$n: $t") :::
+            v.scalaParameters.map((n, t) => s"$n: ${t.scalaType}") :::
               req.toList.map(r => s"request: ${r.scalaType}")
 
           val body = req match
@@ -278,13 +308,8 @@ def resourceCode(
             if v.scalaQueryParams.nonEmpty then
               "\n    val params = " + v.scalaQueryParams
                 .map {
-                  case (k, p) if p.required =>
-                    s"""Map("$k" -> ${toScalaName(k)})"""
-                  case (k, p) =>
-                    s"""${toScalaName(
-                        k
-                      )}.map(p => Map("$k" -> p.toString)).getOrElse(Map.empty)"""
-
+                  case (k, p) if p.required => s"""Map("$k" -> $k)"""
+                  case (k, p)               => s"""$k.map(p => Map("$k" -> p.toString)).getOrElse(Map.empty)"""
                 }
                 .mkString("", " ++ ", "\n")
             else ""
@@ -300,15 +325,27 @@ def resourceCode(
 
           val (resType, mapResponse) = v.response match
             case Some(r) if r.schemaPath.forall(hasProps) =>
+              val bodyType = r.scalaType
+
               (
-                responseType(r.scalaType),
-                s".mapResponse(_.flatMap(_.fromJson[${r.scalaType}]))"
+                responseType(bodyType),
+                jsonCodec match
+                  case JsonCodec.ZioJson => s".mapResponse(_.flatMap(_.fromJson[$bodyType]))"
+                  case JsonCodec.Jsoniter =>
+                    s"""|.response(
+                        |  asByteArrayAlways.map(a =>
+                        |    try {
+                        |      Right(readFromArray[$bodyType](a))
+                        |    } catch {
+                        |      case e => Left(e.getMessage())
+                        |    }
+                        |  )
+                        |)""".stripMargin
               )
             case _ => (responseType("String"), "")
 
-          s"""|def ${k}(${params.mkString(",\n")}): $resType = {$queryParams
-              |  basicRequest.${v.httpMethod
-               .toLowerCase()}(uri"$reqUri"$addParams)$body$mapResponse
+          s"""|def ${toScalaName(k)}(${params.mkString(",\n")}): $resType = {$queryParams
+              |  resourceRequest.${v.httpMethod.toLowerCase()}($reqUri$addParams)$body$mapResponse
               |}""".stripMargin
         }
         .mkString("\n", "\n\n", "\n") +
@@ -351,72 +388,92 @@ def schemasCode(
     pkg: String,
     jsonCodec: JsonCodec,
     hasProps: SchemaPath => Boolean
-): String =
+): String = {
+  def `def toJsonString`(objName: String) = jsonCodec match
+    case JsonCodec.ZioJson =>
+      s"def toJsonString: String = $objName.jsonCodec.encodeJson(this, None).toString()"
+    case JsonCodec.Jsoniter =>
+      s"def toJsonString: String = writeToString(this)"
+
+  def jsonDecoder(objName: String) = jsonCodec match
+    case JsonCodec.ZioJson =>
+      s"""|object $objName {
+          |  implicit val jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]
+          |}""".stripMargin
+    case JsonCodec.Jsoniter =>
+      s"""|object $objName {
+          |  implicit val jsonCodec: JsonValueCodec[$objName] = JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true))
+          |}""".stripMargin
+
+  def toSchemaClass(s: Schema): String =
+    val scalaName = s.id.scalaName
+    s"""|case class $scalaName(
+        |${s
+         .scalaProperties(hasProps)
+         .map { (n, t) =>
+           s"${t.description
+               .map { d =>
+                 d.replace("\n", "\n//").split("\\. ").filter(_.nonEmpty).mkString("    // ", ". \n    // ", "\n")
+               }
+               .getOrElse("")}$n: ${t.scalaType}"
+         }
+         .mkString("", ",\n", "")}
+        |) {\n${`def toJsonString`(scalaName)}\n}\n
+        |
+        |${jsonDecoder(scalaName)}
+        |""".stripMargin
+
+  val props = v.scalaProperties(hasProps)
+
   List(
     s"package $pkg",
     "",
     jsonCodec match {
       case JsonCodec.ZioJson => "import zio.json.*"
-    }, {
-      // plain scala json encoder impl
-      // val `def toJsonString` =
-      //   s"""| {\n  def toJsonString: String = {
-      //       |    val sb = StringBuilder("{")
-      //       |    ${v
-      //        .sortedProps(hasProps)
-      //        .zipWithIndex
-      //        .map { case ((n, p), i) =>
-      //          toJsonStrPair(n, p, isFirst = i == 0, hasRequired = v.hasRequired)
-      //        }
-      //        .mkString("\n    ")}
-      //       |    sb.append("}").result()
-      //       |  }
-      //       |}""".stripMargin
-
-      val scalaName = v.id.scalaName
-
-      val `def toJsonString` = jsonCodec match
-        case JsonCodec.ZioJson =>
-          s"def toJsonString: String = $scalaName.jsonCodec.encodeJson(this, None).toString()"
-
-      val jsonDecoder = jsonCodec match
-        case JsonCodec.ZioJson =>
-          s"""|object $scalaName {
-              |  implicit val jsonCodec: JsonCodec[$scalaName] = JsonCodec.derived[$scalaName]
-              |}""".stripMargin
-
-      s"""|case class $scalaName(
-          |${v
-           .scalaProperties(hasProps)
-           .map((n, t) => s"$n: $t")
-           .mkString("    ", ",\n    ", "")}
-          |) {\n  ${`def toJsonString`}\n}
-          |
-          |$jsonDecoder
-          |""".stripMargin
-    }
+      case JsonCodec.Jsoniter =>
+        """|import com.github.plokhotnyuk.jsoniter_scala.core.*
+           |import com.github.plokhotnyuk.jsoniter_scala.macros.*""".stripMargin
+    },
+    toSchemaClass(v)
   ).mkString("\n")
+}
+
+case class FlatPath(path: String, params: List[String])
 
 case class Method(
     httpMethod: String,
     path: String,
+    flatPath: Option[FlatPath],
     parameters: Map[String, Parameter],
     parameterOrder: List[String],
     response: Option[SchemaType],
     request: Option[SchemaType] = None
 ) {
-  // non optional parameters first
-  def sortedParams: List[(String, Parameter)] =
-    parameters.toList.sortBy(!_._2.required)
+  private def flatPathParams: List[(String, Parameter)] = flatPath.toList.flatMap(p =>
+    p.params.map(param =>
+      param -> Parameter(
+        description = None,
+        location = "path",
+        typ = SchemaType.Primitive("string", false, None),
+        required = true,
+        pattern = None
+      )
+    )
+  )
 
-  def scalaParameters: List[(String, String)] = sortedParams.map { (k, v) =>
-    (toScalaName(k), v.scalaType)
+  def urlPath: String = flatPath.map(_.path).getOrElse(path)
+
+  // non optional parameters first
+  def scalaParameters: List[(String, Parameter)] =
+    (flatPathParams ::: parameters.toList.drop(if flatPath.nonEmpty then 1 else 0))
+      .map((k, v) => (toScalaName(k), v))
+      .sortBy(!_._2.required)
+
+  def scalaPathParams: List[String] = scalaParameters.collect {
+    case (k, p) if p.location == "path" => k
   }
 
-  def scalaPathParams: List[String] = parameterOrder.map(toScalaName(_))
-
-  def scalaQueryParams: List[(String, Parameter)] =
-    sortedParams.dropWhile((k, _) => parameterOrder.contains(k))
+  def scalaQueryParams: List[(String, Parameter)] = scalaParameters.filter(_._2.location == "query")
 }
 
 object Method:
@@ -424,6 +481,15 @@ object Method:
     Method(
       httpMethod = o("httpMethod").str,
       path = o("path").str,
+      flatPath = o.value
+        .get("flatPath")
+        .map(_.str)
+        .map(path =>
+          FlatPath(
+            path = path,
+            params = "\\{(.*?)\\}".r.findAllIn(path).map(_.stripPrefix("{").stripSuffix("}")).toList
+          )
+        ),
       parameterOrder = o.value.get("parameterOrder").map(read[List[String]](_)).getOrElse(Nil),
       parameters = o.value
         .get("parameters")
@@ -450,10 +516,10 @@ def readResources(
       v.obj.remove("resources").map(_.obj) match
         case None => readResources(xs, result.updated(k, read[Resource](v)))
         case Some(obj) =>
-          readResources(
-            obj.map((a, b) => ResourcePath(k, a) -> b).toList ::: xs,
-            result
-          )
+          val newRes = obj.map((a, b) => ResourcePath(k, a) -> b).toList ::: xs
+          Try(read[Resource](v)) match
+            case Success(res) => readResources(newRes, result.updated(k, res))
+            case _            => readResources(newRes, result)
     case Nil => result
 
 case class Parameter(
@@ -477,8 +543,8 @@ object Parameter:
     )
   }
 
-case class Property(description: Option[String], typ: SchemaType) {
-  def scalaType: String = typ.scalaType
+case class Property(description: Option[String], typ: SchemaType, readOnly: Boolean = false) {
+  def scalaType: String = typ.withOptional(typ.optional || readOnly).scalaType
   def schemaPath: Option[SchemaPath] = typ.schemaPath
   def nestedSchemaPath: Option[SchemaPath] = typ.schemaPath.filter(_.hasNested)
 }
@@ -487,7 +553,8 @@ object Property:
   def readProperty(name: SchemaPath, o: ujson.Obj) =
     Property(
       description = o.value.get("description").map(_.str),
-      typ = SchemaType.readType(name, o)
+      typ = SchemaType.readType(name, o),
+      readOnly = o.value.get("readOnly").map(_.bool).getOrElse(false)
     )
 
 enum SchemaType(val optional: Boolean):
@@ -515,8 +582,7 @@ enum SchemaType(val optional: Boolean):
     case t: Object    => t.copy(optional = o)
 
   def scalaType: String = this match
-    case Primitive("string", _, Some("google-datetime")) =>
-      toType("java.time.OffsetDateTime")
+    case Primitive("string", _, Some("google-datetime"))   => toType("java.time.OffsetDateTime")
     case Primitive("string", _, _)                         => toType("String")
     case Primitive("integer", _, Some("int32" | "uint32")) => toType("Int")
     case Primitive("integer", _, Some("int64" | "uint64")) => toType("Long")
@@ -560,10 +626,9 @@ object SchemaPath:
   def apply(name: String): SchemaPath = Vector(name)
 
   extension (s: SchemaPath)
-    def scalaName: String = s
-      .filter(!Set("items", "properties").contains(_))
-      .map(_.capitalize)
-      .mkString
+    def scalaName: String =
+      s.filter(!Set("items", "properties").contains(_)).map(_.capitalize).mkString
+
     def add(nested: String): SchemaPath = s.appended(nested)
     def hasNested: Boolean = s.size > 1
     def jsonPath: Vector[String] = s
@@ -577,17 +642,14 @@ case class Schema(
 
   // required properties first
   // references wihout properties are excluded
-  def sortedProps(hasProps: SchemaPath => Boolean): List[(String, Property)] =
+  private def sortedProps(hasProps: SchemaPath => Boolean): List[(String, Property)] =
     properties
       .filter { (_, prop) =>
         prop.schemaPath.forall(hasProps(_))
       }
       .sortBy(_._2.typ.optional)
-
-  def scalaProperties(hasProps: SchemaPath => Boolean): List[(String, String)] =
-    sortedProps(hasProps).map { (k, prop) =>
-      (toScalaName(k), prop.scalaType)
-    }
+  def scalaProperties(hasProps: SchemaPath => Boolean): List[(String, Property)] =
+    sortedProps(hasProps).map { (k, prop) => (toScalaName(k), prop) }
 }
 
 object Schema:
@@ -665,7 +727,7 @@ case class Specs(
     baseUrl: String,
     schemas: Map[SchemaPath, Schema]
 ) {
-  def hasProps(schemaName: SchemaPath) =
+  def hasProps(schemaName: SchemaPath): Boolean =
     schemas.get(schemaName).exists(_.properties.nonEmpty)
 }
 

@@ -15,7 +15,6 @@ import pubsub.EmulatorBackend
 
 class PubsubJsoniterResourceSpec extends munit.FunSuite {
   test("PublishMessage") {
-    val pMsg = PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = Some("key"))
     val someTopicName = "topic_" + Random.alphanumeric.take(10).mkString
     val projectId = "any"
 
@@ -35,15 +34,17 @@ class PubsubJsoniterResourceSpec extends munit.FunSuite {
       )
     )
 
-    val publisgReq = projects.Topics.publish(
+    val publishReq = projects.Topics.publish(
       projectsId = projectId,
       topicsId = someTopicName,
-      request = PublishRequest(Vector(PublishMessage(data = "message", attributes = None, orderingKey = None)))
+      request = PublishRequest(
+        Vector(PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = Some("key")))
+      )
     )
 
     EmulatorBackend.resource { backend =>
       assert(backend.send(createTopicReq).body.isRight)
-      assert(backend.send(publisgReq).body.isRight)
+      assert(backend.send(publishReq).body.isRight)
     }
 
   }

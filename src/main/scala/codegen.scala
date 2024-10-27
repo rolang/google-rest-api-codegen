@@ -402,7 +402,8 @@ def schemasCode(
           |}""".stripMargin
     case JsonCodec.Jsoniter =>
       s"""|object $objName {
-          |  implicit val jsonCodec: JsonValueCodec[$objName] = JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true))
+          |  implicit val jsonCodec: JsonValueCodec[$objName] =
+          |    JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true).withDiscriminatorFieldName(None))
           |}""".stripMargin
 
   def toSchemaClass(s: Schema): String =

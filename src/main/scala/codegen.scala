@@ -56,6 +56,7 @@ case class GeneratorConfig(
     schemasPkg: String,
     httpSource: HttpSource = HttpSource.Sttp4,
     jsonCodec: JsonCodec = JsonCodec.ZioJson,
+    dialect: Dialect = Dialect.Scala3,
     preprocess: Specs => Specs = s => s
 )
 
@@ -65,6 +66,9 @@ object GeneratorConfig:
 
   enum JsonCodec:
     case ZioJson, Jsoniter
+
+  enum Dialect:
+    case Scala3, Scala2
 
 enum SpecsInput:
   case StdIn
@@ -105,6 +109,10 @@ def argsToTask(args: Seq[String]): Either[String, Task] =
       .get("--json-codec")
       .flatMap(v => JsonCodec.values.find(_.toString().equalsIgnoreCase(v)))
       .toRight("Missing or invalid --json-codec")
+    dialect = argsMap
+      .get("--dialect")
+      .flatMap(v => Dialect.values.find(_.toString().equalsIgnoreCase(v)))
+      .getOrElse(Dialect.Scala3)
     incResources = argsMap
       .get("--include-resources")
       .toList
@@ -117,6 +125,7 @@ def argsToTask(args: Seq[String]): Either[String, Task] =
       schemasPkg = schemasPkg,
       httpSource = httpSource,
       jsonCodec = jsonCodec,
+      dialect = dialect,
       preprocess = s => {
         incResources.partitionMap(s => if s.startsWith("!") then Left(s.stripPrefix("!")) else Right(s)) match
           case (Nil, Nil)  => s
@@ -132,7 +141,8 @@ def generateBySpec(
     specs: Specs,
     config: GeneratorConfig
 ): Future[List[File]] = {
-  val resourcesPath = config.outDir / config.resourcesPkg.split('.')
+  val resourcesSplit = config.resourcesPkg.split('.')
+  val resourcesPath = config.outDir / resourcesSplit
   val schemasPath = config.outDir / config.schemasPkg.split('.')
 
   for {
@@ -149,15 +159,22 @@ def generateBySpec(
             Files.writeString(
               path,
               List(
-                s"package ${config.resourcesPkg}",
+                config.dialect match
+                  case Dialect.Scala2 => s"package ${resourcesSplit.dropRight(1).mkString(".")}"
+                  case Dialect.Scala3 => s"package ${config.resourcesPkg}",
                 "",
                 config.httpSource match {
                   case HttpSource.Sttp4 => "import sttp.model.*\nimport sttp.client4.*"
                   case HttpSource.Sttp3 => "import sttp.model.*\nimport sttp.client3.*"
                 },
-                "",
+                config.dialect match
+                  case Dialect.Scala2 => s"package object ${resourcesSplit.last} {"
+                  case Dialect.Scala3 => "",
                 "val resourceRequest: PartialRequest[Either[String, String]] = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
-                s"""val resourceBaseUrl: Uri = uri"${specs.baseUrl}""""
+                s"""val resourceBaseUrl: Uri = uri"${specs.baseUrl}"""",
+                config.dialect match
+                  case Dialect.Scala2 => "}"
+                  case Dialect.Scala3 => ""
               ).mkString("\n")
             )
             List(path.toFile())
@@ -191,6 +208,7 @@ def generateBySpec(
                   schema,
                   config.schemasPkg,
                   config.jsonCodec,
+                  config.dialect,
                   p => specs.hasProps(p)
                 )
                 val path = schemasPath / s"${schemaPath.scalaName}.scala"
@@ -268,8 +286,8 @@ def resourceCode(
     s"import $resourcesPkg.*",
     "",
     httpSource match {
-      case HttpSource.Sttp4 => "import sttp.model.*\nimport sttp.client4.*"
-      case HttpSource.Sttp3 => "import sttp.model.*\nimport sttp.client3.*"
+      case HttpSource.Sttp4 => "import sttp.model.Uri.PathSegment\nimport sttp.client4.*"
+      case HttpSource.Sttp3 => "import sttp.model.Uri.PathSegment\nimport sttp.client3.*"
     },
     jsonCodec match {
       case JsonCodec.ZioJson  => "import zio.json.*"
@@ -284,15 +302,15 @@ def resourceCode(
               .split("/")
               .map(s =>
                 "\\{(.*?)\\}".r.findAllIn(s).toList match
-                  case Nil                => s"\"$s\""
-                  case v :: Nil if v == s => toScalaName(v.stripPrefix("{").stripSuffix("}"))
+                  case Nil                => s"PathSegment(\"$s\")"
+                  case v :: Nil if v == s => "PathSegment(" + toScalaName(v.stripPrefix("{").stripSuffix("}")) + ")"
                   case vars =>
-                    "s\"" + vars.foldLeft(s)((res, v) =>
+                    "PathSegment(s\"" + vars.foldLeft(s)((res, v) =>
                       res.replace(v, "$" + v.stripPrefix("{").stripSuffix("}"))
-                    ) + "\""
+                    ) + "\")"
               )
 
-          val reqUri = s"resourceBaseUrl.addPath(${pathSegments.mkString(", ")})"
+          val reqUri = s"resourceBaseUrl.addPathSegments(List(${pathSegments.mkString(", ")}))"
 
           val req = v.request.filter(_.schemaPath.forall(hasProps))
 
@@ -337,7 +355,7 @@ def resourceCode(
                         |    try {
                         |      Right(readFromArray[$bodyType](a))
                         |    } catch {
-                        |      case e => Left(e.getMessage())
+                        |      case e: Throwable => Left(e.getMessage())
                         |    }
                         |  )
                         |)""".stripMargin
@@ -387,6 +405,7 @@ def schemasCode(
     v: Schema,
     pkg: String,
     jsonCodec: JsonCodec,
+    dialect: Dialect,
     hasProps: SchemaPath => Boolean
 ): String = {
   def `def toJsonString`(objName: String) = jsonCodec match
@@ -398,11 +417,13 @@ def schemasCode(
   def jsonDecoder(objName: String) = jsonCodec match
     case JsonCodec.ZioJson =>
       s"""|object $objName {
-          |  implicit val jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]
+          |  ${
+           if dialect == Dialect.Scala3 then "given" else "implicit val"
+         } jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]
           |}""".stripMargin
     case JsonCodec.Jsoniter =>
       s"""|object $objName {
-          |  implicit val jsonCodec: JsonValueCodec[$objName] =
+          |  ${if dialect == Dialect.Scala3 then "given" else "implicit val"} jsonCodec: JsonValueCodec[$objName] =
           |    JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true).withDiscriminatorFieldName(None))
           |}""".stripMargin
 

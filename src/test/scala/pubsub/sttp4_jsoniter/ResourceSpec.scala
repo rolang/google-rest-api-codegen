@@ -38,7 +38,7 @@ class PubsubJsoniterResourceSpec extends munit.FunSuite {
       projectsId = projectId,
       topicsId = someTopicName,
       request = PublishRequest(
-        Vector(PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = Some("key")))
+        List(PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = Some("key")))
       )
     )
 

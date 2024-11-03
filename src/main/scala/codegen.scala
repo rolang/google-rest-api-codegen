@@ -30,9 +30,8 @@ import scala.jdk.CollectionConverters.*
           30.seconds
         )
         .onComplete {
-          case Failure(exception) =>
-            println(s"Failure: ${exception.printStackTrace()}")
-          case Success(_) => ()
+          case Failure(exception) => Console.err.println(s"Failure: ${exception.printStackTrace()}")
+          case Success(_)         => ()
         }
 
 extension (p: Path)
@@ -156,8 +155,6 @@ def generateBySpec(
           Future
             .traverse(specs.resources) { (resourceKey, resource) =>
               val resourceName = resourceKey.scalaName
-              println(s"resourcesPath: $resourcesPath")
-              println(s"resourceName: $resourceName")
               Future {
                 val code = resourceCode(
                   pkg = resourceKey.pkgName(config.resourcesPkg),
@@ -171,7 +168,6 @@ def generateBySpec(
                   hasProps = p => specs.hasProps(p)
                 )
                 val path = resourceKey.dirPath(resourcesPath) / s"$resourceName.scala"
-                println(s"path: $path")
                 Files.writeString(path, code)
                 path.toFile()
               }

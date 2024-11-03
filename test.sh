@@ -14,23 +14,23 @@ rm -rf $test_dir && \
 .bin/codegen \
  --out-dir=$test_dir \
  --specs=src/test/resources/pubsub_v1.json \
- --resources-pkg=gcp.pubsub.v1.resources \
- --schemas-pkg=gcp.pubsub.v1.schemas \
+ --resources-pkg=gcp.pubsub.v1.resources.jsoniter \
+ --schemas-pkg=gcp.pubsub.v1.schemas.jsoniter \
  --http-source=sttp4 \
- --json-codec=ziojson && \
+ --json-codec=jsoniter && \
 .bin/codegen \
  --out-dir=$test_dir \
  --specs=src/test/resources/storage_v1.json \
- --resources-pkg=gcp.storage.v1.resources \
- --schemas-pkg=gcp.storage.v1.schemas \
+ --resources-pkg=gcp.storage.v1.resources.jsoniter \
+ --schemas-pkg=gcp.storage.v1.schemas.jsoniter \
  --http-source=sttp4 \
- --json-codec=ziojson && \
+ --json-codec=jsoniter && \
 .bin/codegen \
  --out-dir=$test_dir \
  --specs=src/test/resources/aiplatform_v1.json \
- --resources-pkg=gcp.aiplatform.v1.resources \
- --schemas-pkg=gcp.aiplatform.v1.schemas \
+ --resources-pkg=gcp.aiplatform.v1.resources.jsoniter \
+ --schemas-pkg=gcp.aiplatform.v1.schemas.jsoniter \
  --http-source=sttp4 \
- --json-codec=ziojson && \
+ --json-codec=jsoniter && \
 scala-cli fmt . && \
 scala-cli test .

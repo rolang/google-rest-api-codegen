@@ -12,7 +12,7 @@ class PubsubJsoniterCodecSpec extends munit.FunSuite {
   }
 
   test("PublishMessage no ordering key") {
-    val pMsg = PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = None)
+    val pMsg = PublishMessage(data = "data", attributes = Some(Map("key" -> "value")))
     val expected = """{"data":"data","attributes":{"key":"value"}}"""
     val encoded = pMsg.toJsonString
 
@@ -20,7 +20,7 @@ class PubsubJsoniterCodecSpec extends munit.FunSuite {
   }
 
   test("PublishMessage no ordering key, no attributes") {
-    val pMsg = PublishMessage(data = "data", attributes = None, orderingKey = None)
+    val pMsg = PublishMessage(data = "data")
     val expected = """{"data":"data"}"""
     val encoded = pMsg.toJsonString
 

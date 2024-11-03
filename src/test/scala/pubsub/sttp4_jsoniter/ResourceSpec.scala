@@ -24,13 +24,7 @@ class PubsubJsoniterResourceSpec extends munit.FunSuite {
       Topic(
         name = s"projects/$projectId/topics/$someTopicName",
         state = None,
-        labels = Some(Map("label" -> someTopicName)),
-        messageStoragePolicy = None,
-        kmsKeyName = None,
-        schemaSettings = None,
-        satisfiesPzs = None,
-        messageRetentionDuration = None,
-        ingestionDataSourceSettings = None
+        labels = Some(Map("label" -> someTopicName))
       )
     )
 
@@ -38,7 +32,7 @@ class PubsubJsoniterResourceSpec extends munit.FunSuite {
       projectsId = projectId,
       topicsId = someTopicName,
       request = PublishRequest(
-        Vector(PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = Some("key")))
+        List(PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = Some("key")))
       )
     )
 

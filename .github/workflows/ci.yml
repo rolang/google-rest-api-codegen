@@ -16,11 +16,17 @@ jobs:
       - uses: VirtusLab/scala-cli-setup@main
       - name: Start up emulators
         run: docker compose up -d 
-      - name: Cache cli build
-        id: cache-cli-build
-        uses: actions/cache@v4
+      - name: Restore cli build
+        id: restore-cli-build
+        uses: actions/cache/restore@v4
         with:
           path: ./.bin
           key: cli-build
       - run: ls -la && ls -la .bin # for test    
       - run: ./test.sh
+    - name: Save cli build
+      id: cache-cli-build
+      uses: actions/cache/save@v4
+      with:
+        path: ./.bin
+        key: cli-build

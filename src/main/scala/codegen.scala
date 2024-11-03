@@ -424,7 +424,7 @@ def schemasCode(
                .map { d =>
                  d.replace("\n", "\n//").split("\\. ").filter(_.nonEmpty).mkString("    // ", ". \n    // ", "\n")
                }
-               .getOrElse("")}$n: ${(if (t.typ.optional) s"${t.scalaType} = None" else t.scalaType)}"
+               .getOrElse("")}$n: ${(if (t.optional) s"${t.scalaType} = None" else t.scalaType)}"
          }
          .mkString("", ",\n", "")}
         |) {\n${`def toJsonString`(scalaName)}\n}\n
@@ -553,7 +553,8 @@ object Parameter:
   }
 
 case class Property(description: Option[String], typ: SchemaType, readOnly: Boolean = false) {
-  def scalaType: String = typ.withOptional(typ.optional || readOnly).scalaType
+  def optional: Boolean = typ.optional || readOnly
+  def scalaType: String = typ.withOptional(optional).scalaType
   def schemaPath: Option[SchemaPath] = typ.schemaPath
   def nestedSchemaPath: Option[SchemaPath] = typ.schemaPath.filter(_.hasNested)
 }

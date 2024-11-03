@@ -22,7 +22,6 @@ jobs:
         with:
           path: ./.bin
           key: cli-build
-      - run: ls -la && ls -la .bin # for test    
       - run: ./test.sh
       - name: Save cli build
         id: cache-cli-build

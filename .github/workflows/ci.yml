@@ -14,12 +14,13 @@ jobs:
       - uses: actions/checkout@v2
       - uses: coursier/cache-action@v6
       - uses: VirtusLab/scala-cli-setup@main
+      - name: Start up emulators
+        run: docker compose up -d 
       - name: Cache cli build
         id: cache-cli-build
         uses: actions/cache@v4
         with:
           path: ./.bin
           key: cli-build
-      - name: Start up emulators
-        run: docker compose up -d 
+      - run: ls -la && ls -la .bin # for test    
       - run: ./test.sh

@@ -5,7 +5,8 @@ bin_hash=$(sha1sum src/main/scala/* | sha1sum | cut -d ' ' -f 1)
 
 if [ ! -f ".bin/$bin_hash" ]; then 
   rm -rf .bin
-  echo "building executable..."
+  echo ".bin/$bin_hash was not found"
+  echo "building executable with $(scala-cli --version)"
   scala-cli --power package --native --native-mode release-fast . -o .bin/$bin_hash && \
   ln -s $bin_hash .bin/codegen
 fi

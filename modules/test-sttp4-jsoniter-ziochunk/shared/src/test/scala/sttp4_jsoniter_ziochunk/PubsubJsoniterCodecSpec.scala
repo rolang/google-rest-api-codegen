@@ -1,6 +1,6 @@
-package pubsub.sttp4_jsoniter
+package gcp.pubsub.v1.sttp4_jsoniter_ziochunk
 
-import gcp.pubsub.v1.schemas.jsoniter.*
+import gcp.pubsub.v1.sttp4_jsoniter_ziochunk.schemas.*
 
 class PubsubJsoniterCodecSpec extends munit.FunSuite {
   test("PublishMessage") {

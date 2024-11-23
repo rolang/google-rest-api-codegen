@@ -7,5 +7,3 @@ target/
 .bloop/
 metals.sbt
 .scala-build
-src/test/scala/generated
-.bin

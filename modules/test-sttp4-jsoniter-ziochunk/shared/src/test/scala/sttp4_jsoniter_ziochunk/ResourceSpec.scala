@@ -1,7 +1,7 @@
-package pubsub.sttp4_jsoniter
+package gcp.pubsub.v1.sttp4_jsoniter_ziochunk
 
-import gcp.pubsub.v1.resources.jsoniter.*
-import gcp.pubsub.v1.schemas.jsoniter.*
+import gcp.pubsub.v1.sttp4_jsoniter_ziochunk.resources.*
+import gcp.pubsub.v1.sttp4_jsoniter_ziochunk.schemas.*
 import sttp.client4.UriContext
 import scala.util.Random
 import sttp.client4.httpclient.HttpClientSyncBackend
@@ -22,9 +22,7 @@ class PubsubJsoniterResourceSpec extends munit.FunSuite {
       projectsId = projectId,
       topicsId = someTopicName,
       Topic(
-        name = s"projects/$projectId/topics/$someTopicName",
-        state = None,
-        labels = Some(Map("label" -> someTopicName))
+        name = s"projects/$projectId/topics/$someTopicName"
       )
     )
 
@@ -32,13 +30,13 @@ class PubsubJsoniterResourceSpec extends munit.FunSuite {
       projectsId = projectId,
       topicsId = someTopicName,
       request = PublishRequest(
-        List(PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = Some("key")))
+        zio.Chunk(PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = Some("key")))
       )
     )
 
     EmulatorBackend.resource { backend =>
-      assert(backend.send(createTopicReq).body.isRight)
-      assert(backend.send(publishReq).body.isRight)
+      assert(backend.send(createTopicReq).isSuccess)
+      assert(backend.send(publishReq).isSuccess)
     }
 
   }

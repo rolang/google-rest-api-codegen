@@ -452,7 +452,7 @@ case class Method(
     response: Option[SchemaType],
     request: Option[SchemaType] = None
 ) {
-  private def flatPathParams: List[(String, Parameter)] = flatPath.toList.flatMap(p =>
+  private lazy val flatPathParams: List[(String, Parameter)] = flatPath.toList.flatMap(p =>
     p.params.map(param =>
       param -> Parameter(
         description = None,
@@ -466,15 +466,15 @@ case class Method(
 
   def urlPath: String = flatPath.map(_.path).getOrElse(path)
 
+  // filter out path params if flatPath params are given
+  private lazy val pathParams: List[(String, Parameter)] =
+    parameters.toList.filterNot((_, p) => flatPathParams.nonEmpty && p.location == "path")
+
   // non optional parameters first
   def scalaParameters: List[(String, Parameter)] =
-    (flatPathParams ::: parameters.toList.drop(if flatPath.nonEmpty then 1 else 0))
+    (flatPathParams ::: pathParams)
       .map((k, v) => (toScalaName(k), v))
       .sortBy(!_._2.required)
-
-  def scalaPathParams: List[String] = scalaParameters.collect {
-    case (k, p) if p.location == "path" => k
-  }
 
   def scalaQueryParams: List[(String, Parameter)] = scalaParameters.filter(_._2.location == "query")
 }

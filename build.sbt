@@ -125,19 +125,31 @@ def dependencyByConfig(httpSource: String, jsonCodec: String, arrayType: String)
 lazy val testProjects: CompositeProject = new CompositeProject {
   override def componentProjects: Seq[Project] =
     for {
+      (apiName, apiVersion) <- Seq(
+        "pubsub" -> "v1",
+        "storage" -> "v1",
+        "aiplatform" -> "v1",
+        "iamcredentials" -> "v1"
+      )
       httpSource <- Seq("Sttp4", "Sttp3")
       jsonCodec <- Seq("ZioJson", "Jsoniter")
       arrayType <- Seq("ZioChunk", "List")
+      id = s"test-$apiName-$apiVersion-${httpSource}-${jsonCodec}-${arrayType}".toLowerCase()
     } yield {
       Project
         .apply(
-          id = s"test-${httpSource}-${jsonCodec}-${arrayType}".toLowerCase(),
-          base = file(s"modules/test-${httpSource}-${jsonCodec}-${arrayType}".toLowerCase())
+          id = id,
+          base = file("modules") / id
         )
         .settings(testSettings)
         .settings(noPublish)
         .settings(
-          Compile / sourceGenerators += codegenTask(httpSource, jsonCodec, arrayType),
+          Compile / sourceGenerators += codegenTask(
+            apiName -> apiVersion,
+            httpSource,
+            jsonCodec,
+            arrayType
+          ),
           libraryDependencies ++= Seq(
             "org.scalameta" %% "munit" % munitVersion % Test
           ) ++ dependencyByConfig(httpSource = httpSource, jsonCodec = jsonCodec, arrayType = arrayType)
@@ -145,9 +157,15 @@ lazy val testProjects: CompositeProject = new CompositeProject {
     }
 }
 
-def codegenTask(httpSource: String, jsonCodec: String, arrayType: String) = Def.task {
+def codegenTask(
+    specs: (String, String),
+    httpSource: String,
+    jsonCodec: String,
+    arrayType: String
+) = Def.task {
   val logger = streams.value.log
   val cliBin = cliDestBin
+  val (apiName, apiVersion) = specs
 
   if (!cliBin.exists()) {
     logger.error(s"Command line binary ${cliBin.getPath()} was not found. Run 'sbt buildCliBinary' first.")
@@ -176,30 +194,21 @@ def codegenTask(httpSource: String, jsonCodec: String, arrayType: String) = Def.
     IO.delete(outSrcDir)
     IO.createDirectory(outSrcDir)
 
-    for {
-      (specPkg, specPath) <- List(
-        "gcp.pubsub.v1" -> resourcePath("pubsub_v1.json"),
-        "gcp.storage.v1" -> resourcePath("storage_v1.json"),
-        "gcp.aiplatform.v1" -> resourcePath("aiplatform_v1.json"),
-        "gcp.iamcredentials.v1" -> resourcePath("iamcredentials_v1.json")
-      )
-      basePkgName = s"$specPkg.${httpSource}_${jsonCodec}_${arrayType}".toLowerCase()
-    } yield {
-      val cmd =
-        List(
-          s"./${cliBin.getPath()}",
-          s"--specs=$specPath",
-          s"--resources-pkg=$basePkgName.resources",
-          s"--schemas-pkg=$basePkgName.schemas",
-          s"--out-dir=${outSrcDir.getPath()}",
-          s"--dialect=$dialect",
-          s"--http-source=$httpSource",
-          s"--json-codec=$jsonCodec",
-          s"--array-type=$arrayType"
-        ).mkString(" ")
+    val basePkgName = s"gcp.$apiName.$apiVersion.${httpSource}_${jsonCodec}_${arrayType}".toLowerCase()
+    val cmd =
+      List(
+        s"./${cliBin.getPath()}",
+        s"--specs=${resourcePath(s"${apiName}_$apiVersion.json")}",
+        s"--resources-pkg=$basePkgName.resources",
+        s"--schemas-pkg=$basePkgName.schemas",
+        s"--out-dir=${outSrcDir.getPath()}",
+        s"--dialect=$dialect",
+        s"--http-source=$httpSource",
+        s"--json-codec=$jsonCodec",
+        s"--array-type=$arrayType"
+      ).mkString(" ")
 
-      cmd ! ProcessLogger(l => logger.info(l))
-    }
+    cmd ! ProcessLogger(l => logger.info(l))
 
     val files = listFilesRec(List(outDir), Nil)
 

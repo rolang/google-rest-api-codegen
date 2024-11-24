@@ -1,4 +1,4 @@
-package codegen
+package gcp.codegen
 
 import java.nio.file.*
 import upickle.default.*
@@ -63,7 +63,7 @@ case class Task(specsInput: SpecsInput, config: GeneratorConfig) {
         config = config
       )
     } yield println(
-      s"Generated ${files.length} files for ${specs.name} with httpSource: ${config.httpSource}, jsonCodec: ${config.jsonCodec}, arrayType: ${config.arrayType}"
+      s"Generated ${files.length} files in ${config.outDir} with httpSource: ${config.httpSource}, jsonCodec: ${config.jsonCodec}, arrayType: ${config.arrayType}"
     )
   }
 }

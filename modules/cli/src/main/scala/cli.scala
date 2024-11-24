@@ -1,5 +1,5 @@
-import codegen.*
-import codegen.GeneratorConfig.*
+import gcp.codegen.*
+import gcp.codegen.GeneratorConfig.*
 
 import java.nio.file.*
 import upickle.default.*

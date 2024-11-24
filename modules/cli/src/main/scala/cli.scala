@@ -1,15 +1,13 @@
+package gcp.codegen.cli
+
 import gcp.codegen.*
-import gcp.codegen.GeneratorConfig.*
 
 import java.nio.file.*
-import upickle.default.*
 import GeneratorConfig.*
-import scala.concurrent.{Future, Await}
+import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.*
-import java.io.File
-import scala.util.{Failure, Success, Try}
-import scala.jdk.CollectionConverters.*
+import scala.util.{Failure, Success}
 
 @main def run(args: String*) =
   argsToTask(args) match
@@ -22,7 +20,7 @@ import scala.jdk.CollectionConverters.*
           case Success(_)         => ()
         }
 
-def argsToTask(args: Seq[String]): Either[String, Task] =
+private def argsToTask(args: Seq[String]): Either[String, Task] =
   val argsMap = args.toList
     .flatMap(_.split('=').map(_.trim().toLowerCase()))
     .sliding(2, 2)

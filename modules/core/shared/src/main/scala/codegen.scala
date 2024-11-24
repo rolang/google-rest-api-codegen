@@ -3,11 +3,10 @@ package gcp.codegen
 import java.nio.file.*
 import upickle.default.*
 import GeneratorConfig.*
-import scala.concurrent.{Future, Await}
+import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration.*
 import java.io.File
-import scala.util.{Failure, Success, Try}
+import scala.util.{Success, Try}
 import scala.jdk.CollectionConverters.*
 
 extension (p: Path)
@@ -164,7 +163,7 @@ def generateBySpec(
                     dialect = config.dialect,
                     hasProps = p => specs.hasProps(p),
                     arrType = config.arrayType,
-                    commonCodecsPkg = if commonCodecs.nonEmpty then Some(commonCodecsPkg) else None
+                    commonCodecsPkg = if commonCodecs.nonEmpty && schema.hasArrays then Some(commonCodecsPkg) else None
                   )
                   val path = schemasPath / s"${schemaPath.scalaName}.scala"
                   Files.writeString(path, code)
@@ -369,8 +368,6 @@ def schemasCode(
         |${jsonDecoder(scalaName)}
         |""".stripMargin
 
-  val props = schema.scalaProperties(hasProps)
-
   List(
     s"package $pkg",
     "",
@@ -381,11 +378,11 @@ def schemasCode(
            |import com.github.plokhotnyuk.jsoniter_scala.macros.*""".stripMargin
     },
     commonCodecsPkg match
-      case None => ""
-      case Some(value) =>
+      case Some(codecsPkg) =>
         dialect match
-          case Dialect.Scala3 => s"import $value.given"
-          case Dialect.Scala2 => s"import $value.*",
+          case Dialect.Scala3 => s"import $codecsPkg.given"
+          case Dialect.Scala2 => s"import $codecsPkg.*"
+      case _ => "",
     toSchemaClass(schema)
   ).mkString("\n")
 }
@@ -645,7 +642,12 @@ case class Schema(
     description: Option[String],
     properties: List[(String, Property)]
 ) {
-  def hasRequired = properties.exists(!_._2.typ.optional)
+  def hasRequired: Boolean = properties.exists(!_._2.typ.optional)
+
+  def hasArrays: Boolean = properties.exists(_._2.typ match {
+    case gcp.codegen.SchemaType.Array(_, _) => true
+    case _                                  => false
+  })
 
   // required properties first
   // references wihout properties are excluded

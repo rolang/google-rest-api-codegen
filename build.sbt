@@ -2,13 +2,14 @@ ThisBuild / description := "Google Cloud client code generator"
 ThisBuild / organization := "com.anymindgroup"
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / homepage := Some(url("https://anymindgroup.com"))
-ThisBuild / scalaVersion := "3.5.2"
+ThisBuild / scalaVersion := "3.3.4"
 ThisBuild / scalafmt := true
 ThisBuild / scalafmtSbtCheck := true
 ThisBuild / version ~= { v => if (v.contains('+')) s"${v.replace('+', '-')}-SNAPSHOT" else v }
 
-lazy val commonSettings = Seq(
-  Compile / scalacOptions ++= Seq("-Xmax-inlines:64")
+lazy val testSettings = Seq(
+  Compile / scalacOptions ++= Seq("-Xmax-inlines:64"),
+  scalacOptions -= "-Xfatal-warnings"
 )
 
 lazy val noPublish = Seq(
@@ -32,6 +33,15 @@ lazy val munitVersion = "1.0.2"
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 
+lazy val root = (project in file("."))
+  .aggregate(
+    core.native,
+    core.jvm,
+    cli
+  )
+  .aggregate(testProjects.componentProjects.map(p => LocalProject(p.id)) *)
+  .settings(noPublish)
+
 lazy val core = crossProject(JVMPlatform, NativePlatform)
   .in(file("modules/core"))
   .settings(
@@ -46,8 +56,9 @@ lazy val core = crossProject(JVMPlatform, NativePlatform)
 
 lazy val cli = project
   .in(file("modules/cli"))
-  .enablePlugins(ScalaNativePlugin)
+  .aggregate(core.native)
   .dependsOn(core.native)
+  .enablePlugins(ScalaNativePlugin)
   .settings(
     name := "gcp-codegen-cli",
     moduleName := "gcp-codegen-cli"
@@ -123,7 +134,7 @@ lazy val testProjects: CompositeProject = new CompositeProject {
           id = s"test-${httpSource}-${jsonCodec}-${arrayType}".toLowerCase(),
           base = file(s"modules/test-${httpSource}-${jsonCodec}-${arrayType}".toLowerCase())
         )
-        .settings(commonSettings)
+        .settings(testSettings)
         .settings(noPublish)
         .settings(
           Compile / sourceGenerators += codegenTask(httpSource, jsonCodec, arrayType),

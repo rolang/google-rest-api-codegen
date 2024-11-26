@@ -64,46 +64,6 @@ lazy val cli = project
     moduleName := "gcp-codegen-cli"
   )
 
-lazy val cliDestBin: File = {
-  val cliTarget = new File("modules/cli/target/bin")
-
-  def normalise(s: String) = s.toLowerCase.replaceAll("[^a-z0-9]+", "")
-  val props = sys.props.toMap
-  val os = normalise(props.getOrElse("os.name", "")) match {
-    case p if p.startsWith("linux")                         => "linux"
-    case p if p.startsWith("windows")                       => "windows"
-    case p if p.startsWith("osx") || p.startsWith("macosx") => "macosx"
-    case _                                                  => "unknown"
-  }
-
-  val arch = (
-    normalise(props.getOrElse("os.arch", "")),
-    props.getOrElse("sun.arch.data.model", "64")
-  ) match {
-    case ("amd64" | "x64" | "x8664" | "x86", bits) => s"x86_${bits}"
-    case ("aarch64" | "arm64", bits)               => s"aarch$bits"
-    case _                                         => "unknown"
-  }
-
-  val name = s"gcp-codegen-$arch-$os"
-
-  cliTarget / "bin" / name
-}
-
-lazy val buildCliBinary = taskKey[File]("")
-buildCliBinary := {
-  val built = (cli / Compile / nativeLinkReleaseFast).value
-  val destZip = new File(s"${cliDestBin.getPath()}.zip")
-
-  IO.copyFile(built, cliDestBin)
-  sLog.value.info(s"Built cli binary in $cliDestBin")
-
-  IO.zip(Seq((built, "codegen")), destZip, None)
-  sLog.value.info(s"Built cli binary zip in $destZip")
-
-  cliDestBin
-}
-
 def dependencyByConfig(httpSource: String, jsonCodec: String, arrayType: String): List[ModuleID] = {
   (httpSource match {
     case "Sttp3" => List("com.softwaremill.sttp.client3" %% "core" % sttpClient3Version)
@@ -162,15 +122,47 @@ def codegenTask(
     httpSource: String,
     jsonCodec: String,
     arrayType: String
-) = Def.task {
+) = Def.taskDyn {
   val logger = streams.value.log
-  val cliBin = cliDestBin
-  val (apiName, apiVersion) = specs
+  val cliBin = {
+    val cliTarget = new File("modules/cli/target/bin")
 
-  if (!cliBin.exists()) {
-    logger.error(s"Command line binary ${cliBin.getPath()} was not found. Run 'sbt buildCliBinary' first.")
-    List.empty[File]
-  } else {
+    def normalise(s: String) = s.toLowerCase.replaceAll("[^a-z0-9]+", "")
+    val props = sys.props.toMap
+    val os = normalise(props.getOrElse("os.name", "")) match {
+      case p if p.startsWith("linux")                         => "linux"
+      case p if p.startsWith("windows")                       => "windows"
+      case p if p.startsWith("osx") || p.startsWith("macosx") => "macosx"
+      case _                                                  => "unknown"
+    }
+
+    val arch = (
+      normalise(props.getOrElse("os.arch", "")),
+      props.getOrElse("sun.arch.data.model", "64")
+    ) match {
+      case ("amd64" | "x64" | "x8664" | "x86", bits) => s"x86_${bits}"
+      case ("aarch64" | "arm64", bits)               => s"aarch$bits"
+      case _                                         => "unknown"
+    }
+
+    val name = s"gcp-codegen-$arch-$os"
+
+    val cliDestBin = cliTarget / name
+    val built = (cli / Compile / nativeLinkReleaseFast).value
+    val destZip = new File(s"${cliDestBin.getPath()}.zip")
+
+    IO.copyFile(built, cliDestBin)
+    sLog.value.info(s"Built cli binary in $cliDestBin")
+
+    IO.zip(Seq((built, "codegen")), destZip, None)
+    sLog.value.info(s"Built cli binary zip in $destZip")
+
+    cliDestBin
+  }
+
+  Def.task {
+    val (apiName, apiVersion) = specs
+
     val outDir = (Compile / sourceManaged).value
     val scalaV = scalaVersion.value
     val outSrcDir = outDir / (if (scalaV.startsWith("3")) "scala-3" else "scala-2")

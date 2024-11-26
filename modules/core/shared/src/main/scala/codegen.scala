@@ -215,6 +215,12 @@ def mapSpecs(specs: Specs): Specs = {
           }
         )
       )
+    case (k @ "GoogleCloudAiplatformV1GenerateContentResponseUsageMetadata", schema) =>
+      Map(SchemaPath(k) -> schema.copy(properties = schema.properties.map {
+        // make optional
+        case (k @ "candidatesTokenCount", v) => k -> v.copy(typ = v.typ.withOptional(true))
+        case (k, v)                          => k -> v
+      }))
     case (k, v) => Map(SchemaPath(k) -> v)
   }
 

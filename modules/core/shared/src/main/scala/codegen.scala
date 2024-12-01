@@ -50,13 +50,16 @@ enum SpecsInput:
   case StdIn
   case FilePath(path: Path)
 
-case class Task(specsInput: SpecsInput, config: GeneratorConfig) {
+case class Task(
+    specsInput: SpecsInput,
+    config: GeneratorConfig
+) {
   def run: Future[Unit] = {
     for {
       content <- specsInput match
         case SpecsInput.StdIn          => Future(Console.in.lines().iterator().asScala.mkString)
         case SpecsInput.FilePath(path) => Future(Files.readString(path))
-      specs = mapSpecs(read[Specs](content))
+      specs = read[Specs](content)
       files <- generateBySpec(
         specs = config.preprocess(specs),
         config = config
@@ -182,50 +185,6 @@ val scalaKeyWords = Set("type", "import", "val", "object", "enum", "export")
 def toScalaName(n: String): String =
   if scalaKeyWords.contains(n) then s"`$n`"
   else n.replaceAll("[^a-zA-Z0-9_]", "")
-
-def mapSpecs(specs: Specs): Specs = {
-  // add a PublishMessage schema with non optional data and removed messageId / publishTime
-  val newSchemaId = SchemaPath("PublishMessage")
-  val updatedSchemas = specs.schemas.map((k, v) => (k.scalaName, v)).flatMap {
-    case (k @ "PubsubMessage", pm) =>
-      Map(
-        SchemaPath(k) -> pm,
-        newSchemaId -> pm.copy(
-          id = newSchemaId,
-          properties = pm.properties
-            .filter((k, _) => !Set("messageId", "publishTime").contains(k))
-            .map {
-              case (k @ "data", v) =>
-                (k, v.copy(typ = v.typ.withOptional(false)))
-              case kv => kv
-            }
-        )
-      )
-    // update PublishRequest to use PublishMessage schema
-    case (k @ "PublishRequest", pr) =>
-      Map(
-        SchemaPath(k) -> pr.copy(
-          properties = pr.properties.map {
-            case (k @ "messages", v) =>
-              (
-                k,
-                v.copy(typ = SchemaType.Array(SchemaType.Ref(newSchemaId, false), false))
-              )
-            case kv => kv
-          }
-        )
-      )
-    case (k @ "GoogleCloudAiplatformV1GenerateContentResponseUsageMetadata", schema) =>
-      Map(SchemaPath(k) -> schema.copy(properties = schema.properties.map {
-        // make optional
-        case (k @ "candidatesTokenCount", v) => k -> v.copy(typ = v.typ.withOptional(true))
-        case (k, v)                          => k -> v
-      }))
-    case (k, v) => Map(SchemaPath(k) -> v)
-  }
-
-  specs.copy(schemas = updatedSchemas)
-}
 
 def resourceCode(
     pkg: String,
@@ -606,7 +565,8 @@ object SchemaType:
   def readType(context: SchemaPath, o: ujson.Obj): SchemaType =
     val optional = o.value
       .get("description")
-      .exists(_.str.toLowerCase().startsWith("optional"))
+      .map(_.str.toLowerCase())
+      .exists(d => d.startsWith("optional") || !d.startsWith("required"))
 
     o.value.get("items").map(_.obj) match
       case Some(v) =>

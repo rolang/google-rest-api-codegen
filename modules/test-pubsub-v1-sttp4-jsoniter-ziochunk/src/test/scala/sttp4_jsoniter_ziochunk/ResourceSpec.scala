@@ -2,16 +2,8 @@ package gcp.pubsub.v1.sttp4_jsoniter_ziochunk
 
 import gcp.pubsub.v1.sttp4_jsoniter_ziochunk.resources.*
 import gcp.pubsub.v1.sttp4_jsoniter_ziochunk.schemas.*
-import sttp.client4.UriContext
-import scala.util.Random
-import sttp.client4.httpclient.HttpClientSyncBackend
-import java.net.http.HttpClient
-import java.net.http.HttpClient.Version
-import scala.util.Try
-import scala.util.Failure
-import scala.util.Success
-import sttp.client4.Request
 import pubsub.EmulatorBackend
+import scala.util.Random
 
 class PubsubJsoniterResourceSpec extends munit.FunSuite {
   test("PublishMessage") {
@@ -30,7 +22,9 @@ class PubsubJsoniterResourceSpec extends munit.FunSuite {
       projectsId = projectId,
       topicsId = someTopicName,
       request = PublishRequest(
-        zio.Chunk(PublishMessage(data = "data", attributes = Some(Map("key" -> "value")), orderingKey = Some("key")))
+        zio.Chunk(
+          PubsubMessage(data = Some("data"), attributes = Some(Map("key" -> "value")), orderingKey = Some("key"))
+        )
       )
     )
 

@@ -18,4 +18,4 @@ jobs:
           power: true
       - name: Start up emulators
         run: docker compose up -d 
-      - run: sbt buildCliBinary test
+      - run: sbt test

@@ -12,6 +12,16 @@ lazy val testSettings = Seq(
   scalacOptions -= "-Xfatal-warnings"
 )
 
+lazy val publishSettings = Seq(
+  credentials += {
+    for {
+      username <- sys.env.get("ARTIFACT_REGISTRY_USERNAME")
+      apiKey <- sys.env.get("ARTIFACT_REGISTRY_PASSWORD")
+    } yield Credentials("https://asia-maven.pkg.dev", "asia-maven.pkg.dev", username, apiKey)
+  }.getOrElse(Credentials(Path.userHome / ".ivy2" / ".credentials")),
+  publishTo := Some("AnyChat Maven" at "https://asia-maven.pkg.dev/anychat-staging/maven")
+)
+
 lazy val noPublish = Seq(
   publish := {},
   publishLocal := {},
@@ -44,6 +54,7 @@ lazy val root = (project in file("."))
 
 lazy val core = crossProject(JVMPlatform, NativePlatform)
   .in(file("modules/core"))
+  .settings(publishSettings)
   .settings(
     name := "gcp-codegen",
     moduleName := "gcp-codegen"
@@ -59,6 +70,7 @@ lazy val cli = project
   .aggregate(core.native)
   .dependsOn(core.native)
   .enablePlugins(ScalaNativePlugin)
+  .settings(publishSettings)
   .settings(
     name := "gcp-codegen-cli",
     moduleName := "gcp-codegen-cli"
@@ -152,10 +164,6 @@ def codegenTask(
     val destZip = new File(s"${cliDestBin.getPath()}.zip")
 
     IO.copyFile(built, cliDestBin)
-    sLog.value.info(s"Built cli binary in $cliDestBin")
-
-    IO.zip(Seq((built, "codegen")), destZip, None)
-    sLog.value.info(s"Built cli binary zip in $destZip")
 
     cliDestBin
   }
@@ -164,6 +172,7 @@ def codegenTask(
     val (apiName, apiVersion) = specs
 
     val outDir = (Compile / sourceManaged).value
+    val outPathRel = outDir.relativeTo(new File(".")).map(_.getPath()).getOrElse("")
     val scalaV = scalaVersion.value
     val outSrcDir = outDir / (if (scalaV.startsWith("3")) "scala-3" else "scala-2")
     val dialect = if (scalaV.startsWith("3")) "Scala3" else "Scala2"
@@ -205,10 +214,10 @@ def codegenTask(
     val files = listFilesRec(List(outDir), Nil)
 
     // formatting (may need to find another way...)
-    logger.info(s"Formatting sources in $outDir...")
+    logger.info(s"Formatting sources in $outPathRel...")
     s"scala-cli fmt --scalafmt-conf=./.scalafmt.conf $outDir" ! ProcessLogger(_ => ()) // add logs when needed
-    s"rm -rf $outDir/.scala-build".!!
-    logger.success("Formatting done")
+    IO.delete(outDir / ".scala-build")
+    logger.success(s"Formatting sources in $outPathRel done")
 
     files
   }

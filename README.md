@@ -2,24 +2,44 @@
 
 Generates client code from Google's [disovery document](https://developers.google.com/discovery/v1/using).
 
-### Running and testing via [scala-cli](https://scala-cli.virtuslab.org/)
+### Usage
+
+#### Command-line usage
+
+##### Configuration parameters (currently supported):
+
+| Configuration       | Description | Options | Default |
+| ------------------- | ---------------- | ------- | --- |
+| --out-dir           | Ouput directory | | |
+| --specs             | Can be `stdin` or a path to the JSON file. | | |
+| --resources-pkg     | Target package for generated resources |  | |
+| --schemas-pkg       | Target package for generated schemas |  | |
+| --dialect           | Used dialect | `Scala3`, `Scala2` | `Scala3` |
+| --http-source       | Generated http source. | [Sttp4](https://sttp.softwaremill.com/en/latest), [Sttp3](https://sttp.softwaremill.com/en/stable) | |
+| --json-codec        | Generated JSON codec | [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)  | |
+| --array-type        | Collection type for JSON arrays | `List`, `Vector`, `Array`, `ZioChunk` | `List` |
+| --include-resources | Optional resource filter. | | |
+
+##### Examples:
 
 ```shell
-# ensure target directory is empty: rm -rf src/test/scala/generated
-scala-cli . -- \
- --out-dir=src/test/scala/generated \
- --specs=src/test/resources/pubsub_v1.json \
+curl 'https://pubsub.googleapis.com/$discovery/rest?version=v1' > pubsub_v1.json
+
+codegen \
+ --out-dir=src/scala/main/generated \
+ --specs=./pubsub_v1.json \
  --resources-pkg=gcp.pubsub.v1.resources \
  --schemas-pkg=gcp.pubsub.v1.schemas \
  --http-source=sttp4 \
- --json-codec=ziojson \
+ --json-codec=jsoniter \
  --include-resources='projects.*,!projects.snapshots' # optional filters
+```
 
-# run formatter 
-scala-cli fmt .
+#### TODO add usage example in Scala ... 
 
-# checkout the ouput in src/test/scala/generated
+### Building and testing
 
-# compile and test generated output
-scala-cli test .
+Generate, compile and run tests for generated code
+```shell
+sbt test
 ```

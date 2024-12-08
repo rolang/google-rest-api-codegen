@@ -18,16 +18,4 @@ jobs:
           power: true
       - name: Start up emulators
         run: docker compose up -d 
-      - name: Restore cli build
-        id: restore-cli-build
-        uses: actions/cache/restore@v4
-        with:
-          path: ./.bin
-          key: cli-build
-      - run: ./test.sh
-      - name: Save cli build
-        id: cache-cli-build
-        uses: actions/cache/save@v4
-        with:
-          path: ./.bin
-          key: cli-build
+      - run: sbt test

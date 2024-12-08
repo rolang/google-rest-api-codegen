@@ -1,38 +1,13 @@
-import GeneratorConfig.*
+package gcp.codegen
 
 import java.nio.file.*
 import upickle.default.*
 import GeneratorConfig.*
-import scala.concurrent.{Future, Await}
+import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration.*
 import java.io.File
-import scala.util.{Failure, Success, Try}
+import scala.util.{Success, Try}
 import scala.jdk.CollectionConverters.*
-
-@main def run(args: String*) =
-  argsToTask(args) match
-    case Left(err) => Console.err.println(s"Invalid arguments: $err")
-    case Right(task) =>
-      Await
-        .ready(
-          for {
-            content <- task.specsInput match
-              case SpecsInput.StdIn =>
-                Future(Console.in.lines().iterator().asScala.mkString)
-              case SpecsInput.FilePath(path) => Future(Files.readString(path))
-            specs = mapSpecs(read[Specs](content))
-            files <- generateBySpec(
-              specs = task.config.preprocess(specs),
-              config = task.config
-            )
-          } yield println(s"Generated ${files.length} files for ${specs.name}"),
-          30.seconds
-        )
-        .onComplete {
-          case Failure(exception) => Console.err.println(s"Failure: ${exception.printStackTrace()}")
-          case Success(_)         => ()
-        }
 
 extension (p: Path)
   def /(o: Path) = Path.of(p.toString(), o.toString())
@@ -44,9 +19,10 @@ case class GeneratorConfig(
     outDir: Path,
     resourcesPkg: String,
     schemasPkg: String,
-    httpSource: HttpSource = HttpSource.Sttp4,
-    jsonCodec: JsonCodec = JsonCodec.ZioJson,
-    dialect: Dialect = Dialect.Scala3,
+    httpSource: HttpSource,
+    jsonCodec: JsonCodec,
+    arrayType: ArrayType,
+    dialect: Dialect,
     preprocess: Specs => Specs = s => s
 )
 
@@ -57,6 +33,16 @@ object GeneratorConfig:
   enum JsonCodec:
     case ZioJson, Jsoniter
 
+  enum ArrayType {
+    case List, Vector, Array, ZioChunk
+
+    def toScalaType(t: String): String = this match
+      case List     => s"List[$t]"
+      case Vector   => s"Vector[$t]"
+      case Array    => s"Array[$t]"
+      case ZioChunk => s"zio.Chunk[$t]"
+  }
+
   enum Dialect:
     case Scala3, Scala2
 
@@ -64,68 +50,25 @@ enum SpecsInput:
   case StdIn
   case FilePath(path: Path)
 
-case class Task(specsInput: SpecsInput, config: GeneratorConfig)
-
-def argsToTask(args: Seq[String]): Either[String, Task] =
-  val argsMap = args.toList
-    .flatMap(_.split('=').map(_.trim().toLowerCase()))
-    .sliding(2, 2)
-    .collect { case a :: b :: _ =>
-      a -> b
-    }
-    .toMap
-
-  for {
-    outDir <- argsMap
-      .get("--out-dir")
-      .map(p => Path.of(p))
-      .toRight("Missing --out-dir")
-    specs <- argsMap
-      .get("--specs")
-      .map {
-        case "stdin" => SpecsInput.StdIn
-        case p       => SpecsInput.FilePath(Path.of(p))
-      }
-      .toRight("Missing --specs")
-    resourcesPkg <- argsMap
-      .get("--resources-pkg")
-      .toRight("Missing --resources-pkg")
-    schemasPkg <- argsMap.get("--schemas-pkg").toRight("Missing --schemas-pkg")
-    httpSource <- argsMap
-      .get("--http-source")
-      .flatMap(v => HttpSource.values.find(_.toString().equalsIgnoreCase(v)))
-      .toRight("Missing or invalid --http-source")
-    jsonCodec <- argsMap
-      .get("--json-codec")
-      .flatMap(v => JsonCodec.values.find(_.toString().equalsIgnoreCase(v)))
-      .toRight("Missing or invalid --json-codec")
-    dialect = argsMap
-      .get("--dialect")
-      .flatMap(v => Dialect.values.find(_.toString().equalsIgnoreCase(v)))
-      .getOrElse(Dialect.Scala3)
-    incResources = argsMap
-      .get("--include-resources")
-      .toList
-      .flatMap(_.split(',').toList)
-  } yield Task(
-    specsInput = specs,
-    config = GeneratorConfig(
-      outDir = outDir,
-      resourcesPkg = resourcesPkg,
-      schemasPkg = schemasPkg,
-      httpSource = httpSource,
-      jsonCodec = jsonCodec,
-      dialect = dialect,
-      preprocess = s => {
-        incResources.partitionMap(s => if s.startsWith("!") then Left(s.stripPrefix("!")) else Right(s)) match
-          case (Nil, Nil)  => s
-          case (excl, Nil) => s.copy(resources = s.resources.view.filterKeys(!_.hasMatch(excl)).toMap)
-          case (Nil, incl) => s.copy(resources = s.resources.view.filterKeys(_.hasMatch(incl)).toMap)
-          case (excl, incl) =>
-            s.copy(resources = s.resources.view.filterKeys(k => !k.hasMatch(excl) && k.hasMatch(incl)).toMap)
-      }
+case class Task(
+    specsInput: SpecsInput,
+    config: GeneratorConfig
+) {
+  def run: Future[Unit] = {
+    for {
+      content <- specsInput match
+        case SpecsInput.StdIn          => Future(Console.in.lines().iterator().asScala.mkString)
+        case SpecsInput.FilePath(path) => Future(Files.readString(path))
+      specs = read[Specs](content)
+      files <- generateBySpec(
+        specs = config.preprocess(specs),
+        config = config
+      )
+    } yield println(
+      s"Generated ${files.length} files in ${config.outDir} with httpSource: ${config.httpSource}, jsonCodec: ${config.jsonCodec}, arrayType: ${config.arrayType}"
     )
-  )
+  }
+}
 
 def generateBySpec(
     specs: Specs,
@@ -134,6 +77,9 @@ def generateBySpec(
   val resourcesSplit = config.resourcesPkg.split('.')
   val resourcesPath = config.outDir / resourcesSplit
   val schemasPath = config.outDir / config.schemasPkg.split('.')
+  val commonCodecsObj = "codecs"
+  val commonCodecsPkg = config.schemasPkg + s".$commonCodecsObj"
+  val commonCodecsPath = schemasPath / s"$commonCodecsObj.scala"
 
   for {
     _ <- Future {
@@ -160,7 +106,10 @@ def generateBySpec(
                 config.dialect match
                   case Dialect.Scala2 => s"package object ${resourcesSplit.last} {"
                   case Dialect.Scala3 => "",
-                "val resourceRequest: PartialRequest[Either[String, String]] = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
+                s"val resourceRequest: ${
+                    if config.httpSource == HttpSource.Sttp3 then "RequestT[Empty, Either[String, String], Any]"
+                    else "PartialRequest[Either[String, String]]"
+                  } = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
                 s"""val resourceBaseUrl: Uri = uri"${specs.baseUrl}"""",
                 config.dialect match
                   case Dialect.Scala2 => "}"
@@ -182,7 +131,8 @@ def generateBySpec(
                   resource = resource,
                   httpSource = config.httpSource,
                   jsonCodec = config.jsonCodec,
-                  hasProps = p => specs.hasProps(p)
+                  hasProps = p => specs.hasProps(p),
+                  arrType = config.arrayType
                 )
                 val path = resourceKey.dirPath(resourcesPath) / s"$resourceName.scala"
                 Files.writeString(path, code)
@@ -190,21 +140,40 @@ def generateBySpec(
               }
             },
           // generate schemas with properties
-          Future
-            .traverse(specs.schemas.filter(_._2.properties.nonEmpty)) { (schemaPath, schema) =>
-              Future {
-                val code = schemasCode(
-                  schema,
-                  config.schemasPkg,
-                  config.jsonCodec,
-                  config.dialect,
-                  p => specs.hasProps(p)
-                )
-                val path = schemasPath / s"${schemaPath.scalaName}.scala"
-                Files.writeString(path, code)
-                path.toFile()
-              }
+          for {
+            commonCodecs <- Future {
+              commonSchemaCodecs(
+                schemas = specs.schemas.filter(_._2.properties.nonEmpty),
+                pkg = config.schemasPkg,
+                objName = commonCodecsObj,
+                jsonCodec = config.jsonCodec,
+                dialect = config.dialect,
+                hasProps = p => specs.hasProps(p),
+                arrType = config.arrayType
+              ) match
+                case None => Nil
+                case Some(codecs) =>
+                  Files.writeString(commonCodecsPath, codecs)
+                  List(commonCodecsPath.toFile())
             }
+            schemas <- Future
+              .traverse(specs.schemas.filter(_._2.properties.nonEmpty)) { (schemaPath, schema) =>
+                Future {
+                  val code = schemasCode(
+                    schema = schema,
+                    pkg = config.schemasPkg,
+                    jsonCodec = config.jsonCodec,
+                    dialect = config.dialect,
+                    hasProps = p => specs.hasProps(p),
+                    arrType = config.arrayType,
+                    commonCodecsPkg = if commonCodecs.nonEmpty && schema.hasArrays then Some(commonCodecsPkg) else None
+                  )
+                  val path = schemasPath / s"${schemaPath.scalaName}.scala"
+                  Files.writeString(path, code)
+                  path.toFile()
+                }
+              }
+          } yield commonCodecs ::: schemas.toList
         )
       )
       .map(_.flatten)
@@ -215,46 +184,7 @@ val scalaKeyWords = Set("type", "import", "val", "object", "enum", "export")
 
 def toScalaName(n: String): String =
   if scalaKeyWords.contains(n) then s"`$n`"
-  else if n.contains(".") then s"`$n`"
-  else n
-
-def mapSpecs(specs: Specs): Specs = {
-  // add a PublishMessage schema with non optional data and removed messageId / publishTime
-  val newSchemaId = SchemaPath("PublishMessage")
-  val updatedSchemas = specs.schemas.map((k, v) => (k.scalaName, v)).flatMap {
-    case (k @ "PubsubMessage", pm) =>
-      Map(
-        SchemaPath(k) -> pm,
-        newSchemaId -> pm.copy(
-          id = newSchemaId,
-          properties = pm.properties
-            .filter((k, _) => !Set("messageId", "publishTime").contains(k))
-            .map {
-              case (k @ "data", v) =>
-                (k, v.copy(typ = v.typ.withOptional(false)))
-              case kv => kv
-            }
-        )
-      )
-    // update PublishRequest to use PublishMessage schema
-    case (k @ "PublishRequest", pr) =>
-      Map(
-        SchemaPath(k) -> pr.copy(
-          properties = pr.properties.map {
-            case (k @ "messages", v) =>
-              (
-                k,
-                v.copy(typ = SchemaType.Array(SchemaType.Ref(newSchemaId, false), false))
-              )
-            case kv => kv
-          }
-        )
-      )
-    case (k, v) => Map(SchemaPath(k) -> v)
-  }
-
-  specs.copy(schemas = updatedSchemas)
-}
+  else n.replaceAll("[^a-zA-Z0-9_]", "")
 
 def resourceCode(
     pkg: String,
@@ -265,6 +195,7 @@ def resourceCode(
     resource: Resource,
     httpSource: HttpSource,
     jsonCodec: JsonCodec,
+    arrType: ArrayType,
     hasProps: SchemaPath => Boolean
 ) =
   List(
@@ -303,8 +234,8 @@ def resourceCode(
           val req = v.request.filter(_.schemaPath.forall(hasProps))
 
           val params =
-            v.scalaParameters.map((n, t) => s"$n: ${t.scalaType}") :::
-              req.toList.map(r => s"request: ${r.scalaType}")
+            v.scalaParameters.map((n, t) => s"$n: ${t.scalaType(arrType)}") :::
+              req.toList.map(r => s"request: ${r.scalaType(arrType)}")
 
           val body = req match
             case None    => ""
@@ -331,7 +262,7 @@ def resourceCode(
 
           val (resType, mapResponse) = v.response match
             case Some(r) if r.schemaPath.forall(hasProps) =>
-              val bodyType = r.scalaType
+              val bodyType = r.scalaType(arrType)
 
               (
                 responseType(bodyType),
@@ -351,49 +282,21 @@ def resourceCode(
             case _ => (responseType("String"), "")
 
           s"""|def ${toScalaName(k)}(${params.mkString(",\n")}): $resType = {$queryParams
-              |  resourceRequest.${v.httpMethod.toLowerCase()}($reqUri$addParams)$body$mapResponse
-              |}""".stripMargin
+                |  resourceRequest.${v.httpMethod.toLowerCase()}($reqUri$addParams)$body$mapResponse
+                |}""".stripMargin
         }
         .mkString("\n", "\n\n", "\n") +
       "}"
   ).mkString("\n")
 
-/* plain scala json encoder impl
-def toJsonStrPair(
-    name: String,
-    p: Property,
-    isFirst: Boolean,
-    hasRequired: Boolean
-) = {
-  val sName = toScalaName(name)
-  val getName = sName + (if p.typ.optional then ".get" else "")
-  def append(str: String) =
-    val line = (isFirst, hasRequired, p.typ.optional) match
-      case (true, _, _)     => str
-      case (_, false, true) => s"$${if (sb.size > 1) \",\" else \"\"}$str"
-      case _                => "," + str
-
-    (if p.typ.optional then s"if (${sName}.nonEmpty) " else "") + s"sb.append(s\"\"\"$line\"\"\")"
-
-  p.typ match
-    case SchemaType.Ref(ref, _)               => append(s"\"$sName\":$${$getName.toJsonString}")
-    case SchemaType.Primitive("string", _, _) => append(s"\"$sName\":\"$${$getName}\"")
-    case _: SchemaType.Primitive              => append(s"\"$sName\":$${$getName}")
-    case SchemaType.Array(SchemaType.Ref(ref, _), _) =>
-      append(s"""\"$sName\":[$${$getName.map(_.toJsonString).mkString("", ",", "")}]""")
-    case SchemaType.Array(_, _) => append(s"""\"$sName\":[$${$getName.mkString("\\\"", "\\\",\\\"", "\\\"")}]""")
-    case SchemaType.Object(_, _) =>
-      append(
-        s"\"$sName\":$${$getName.map { case (k, v) => s\"\"\"\"$$k\":\"$$v\"\"\"\"}.mkString(\"{\", \",\", \"}\")}"
-      )
-} */
-
 def schemasCode(
-    v: Schema,
+    schema: Schema,
     pkg: String,
     jsonCodec: JsonCodec,
     dialect: Dialect,
-    hasProps: SchemaPath => Boolean
+    hasProps: SchemaPath => Boolean,
+    arrType: ArrayType,
+    commonCodecsPkg: Option[String]
 ): String = {
   def `def toJsonString`(objName: String) = jsonCodec match
     case JsonCodec.ZioJson =>
@@ -404,13 +307,11 @@ def schemasCode(
   def jsonDecoder(objName: String) = jsonCodec match
     case JsonCodec.ZioJson =>
       s"""|object $objName {
-          |  ${
-           if dialect == Dialect.Scala3 then "given" else "implicit val"
-         } jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]
+          |  ${implicitVal(dialect)} jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]
           |}""".stripMargin
     case JsonCodec.Jsoniter =>
       s"""|object $objName {
-          |  ${if dialect == Dialect.Scala3 then "given" else "implicit val"} jsonCodec: JsonValueCodec[$objName] =
+          |  ${implicitVal(dialect)} jsonCodec: JsonValueCodec[$objName] =
           |    JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true).withDiscriminatorFieldName(None))
           |}""".stripMargin
 
@@ -424,15 +325,13 @@ def schemasCode(
                .map { d =>
                  d.replace("\n", "\n//").split("\\. ").filter(_.nonEmpty).mkString("    // ", ". \n    // ", "\n")
                }
-               .getOrElse("")}$n: ${(if (t.optional) s"${t.scalaType} = None" else t.scalaType)}"
+               .getOrElse("")}$n: ${(if (t.optional) s"${t.scalaType(arrType)} = None" else t.scalaType(arrType))}"
          }
          .mkString("", ",\n", "")}
         |) {\n${`def toJsonString`(scalaName)}\n}\n
         |
         |${jsonDecoder(scalaName)}
         |""".stripMargin
-
-  val props = v.scalaProperties(hasProps)
 
   List(
     s"package $pkg",
@@ -443,8 +342,68 @@ def schemasCode(
         """|import com.github.plokhotnyuk.jsoniter_scala.core.*
            |import com.github.plokhotnyuk.jsoniter_scala.macros.*""".stripMargin
     },
-    toSchemaClass(v)
+    commonCodecsPkg match
+      case Some(codecsPkg) =>
+        dialect match
+          case Dialect.Scala3 => s"import $codecsPkg.given"
+          case Dialect.Scala2 => s"import $codecsPkg.*"
+      case _ => "",
+    toSchemaClass(schema)
   ).mkString("\n")
+}
+
+def commonSchemaCodecs(
+    schemas: Map[SchemaPath, Schema],
+    pkg: String,
+    objName: String,
+    jsonCodec: JsonCodec,
+    dialect: Dialect,
+    hasProps: SchemaPath => Boolean,
+    arrType: ArrayType
+): Option[String] = {
+
+  (jsonCodec, arrType) match
+    case (JsonCodec.Jsoniter, ArrayType.ZioChunk) =>
+      schemas.toList
+        .map(_._2)
+        .flatMap(
+          _.scalaProperties(hasProps)
+            .collect { case (_, Property(_, SchemaType.Array(typ, _), _)) =>
+              typ.scalaType(arrType)
+            }
+        )
+        .distinct match
+        case Nil => None
+        case props =>
+          Some(
+            List(
+              s"""|package $pkg
+                  |
+                  |import com.github.plokhotnyuk.jsoniter_scala.core.*
+                  |import com.github.plokhotnyuk.jsoniter_scala.macros.*
+                  |import zio.Chunk""".stripMargin,
+              "",
+              s"object $objName {",
+              props
+                .map { t =>
+                  val prefix = implicitVal(dialect) + " " + toScalaName(t + "ChunkCodec")
+                  s"""|${prefix}: JsonValueCodec[Chunk[$t]] = new JsonValueCodec[Chunk[$t]] {
+                      |  val arrCodec: JsonValueCodec[Array[$t]] = JsonCodecMaker.make
+                      |
+                      |  override val nullValue: Chunk[$t] = Chunk.empty
+                      |
+                      |  override def decodeValue(in: JsonReader, default: Chunk[$t]): Chunk[$t] =
+                      |    Chunk.fromArray(arrCodec.decodeValue(in, default.toArray))
+                      |
+                      |  override def encodeValue(x: Chunk[$t], out: JsonWriter): Unit =
+                      |    arrCodec.encodeValue(x.toArray, out)
+                      |}""".stripMargin
+                }
+                .mkString("\n\n"),
+              "}"
+            ).mkString("\n")
+          )
+    case _ => None
 }
 
 case class FlatPath(path: String, params: List[String])
@@ -458,7 +417,7 @@ case class Method(
     response: Option[SchemaType],
     request: Option[SchemaType] = None
 ) {
-  private def flatPathParams: List[(String, Parameter)] = flatPath.toList.flatMap(p =>
+  private lazy val flatPathParams: List[(String, Parameter)] = flatPath.toList.flatMap(p =>
     p.params.map(param =>
       param -> Parameter(
         description = None,
@@ -472,15 +431,15 @@ case class Method(
 
   def urlPath: String = flatPath.map(_.path).getOrElse(path)
 
+  // filter out path params if flatPath params are given
+  private lazy val pathParams: List[(String, Parameter)] =
+    parameters.toList.filterNot((_, p) => flatPathParams.nonEmpty && p.location == "path")
+
   // non optional parameters first
   def scalaParameters: List[(String, Parameter)] =
-    (flatPathParams ::: parameters.toList.drop(if flatPath.nonEmpty then 1 else 0))
+    (flatPathParams ::: pathParams)
       .map((k, v) => (toScalaName(k), v))
       .sortBy(!_._2.required)
-
-  def scalaPathParams: List[String] = scalaParameters.collect {
-    case (k, p) if p.location == "path" => k
-  }
 
   def scalaQueryParams: List[(String, Parameter)] = scalaParameters.filter(_._2.location == "query")
 }
@@ -538,7 +497,7 @@ case class Parameter(
     required: Boolean = false,
     pattern: Option[String] = None
 ) {
-  def scalaType = typ.withOptional(!required).scalaType
+  def scalaType(arrType: ArrayType) = typ.withOptional(!required).scalaType(arrType)
 }
 
 object Parameter:
@@ -554,7 +513,7 @@ object Parameter:
 
 case class Property(description: Option[String], typ: SchemaType, readOnly: Boolean = false) {
   def optional: Boolean = typ.optional || readOnly
-  def scalaType: String = typ.withOptional(optional).scalaType
+  def scalaType(arrType: ArrayType): String = typ.withOptional(optional).scalaType(arrType)
   def schemaPath: Option[SchemaPath] = typ.schemaPath
   def nestedSchemaPath: Option[SchemaPath] = typ.schemaPath.filter(_.hasNested)
 }
@@ -568,7 +527,6 @@ object Property:
     )
 
 enum SchemaType(val optional: Boolean):
-
   case Ref(ref: SchemaPath, override val optional: Boolean) extends SchemaType(optional)
   case Primitive(
       `type`: String,
@@ -591,7 +549,7 @@ enum SchemaType(val optional: Boolean):
     case t: Array     => t.copy(optional = o)
     case t: Object    => t.copy(optional = o)
 
-  def scalaType: String = this match
+  def scalaType(arrayType: ArrayType): String = this match
     case Primitive("string", _, Some("google-datetime"))   => toType("java.time.OffsetDateTime")
     case Primitive("string", _, _)                         => toType("String")
     case Primitive("integer", _, Some("int32" | "uint32")) => toType("Int")
@@ -599,15 +557,16 @@ enum SchemaType(val optional: Boolean):
     case Primitive("number", _, Some("double" | "float"))  => toType("Double")
     case Primitive("boolean", _, _)                        => toType("Boolean")
     case Ref(ref, _)                                       => toType(ref.scalaName)
-    case Array(t, _)                                       => toType(s"List[${t.scalaType}]")
-    case Object(t, _)                                      => toType(s"Map[String, ${t.scalaType}]")
+    case Array(t, _)                                       => toType(arrayType.toScalaType(t.scalaType(arrayType)))
+    case Object(t, _)                                      => toType(s"Map[String, ${t.scalaType(arrayType)}]")
     case _                                                 => toType("String")
 
 object SchemaType:
   def readType(context: SchemaPath, o: ujson.Obj): SchemaType =
     val optional = o.value
       .get("description")
-      .exists(_.str.toLowerCase().startsWith("optional"))
+      .map(_.str.toLowerCase())
+      .exists(d => d.startsWith("optional") || !d.startsWith("required"))
 
     o.value.get("items").map(_.obj) match
       case Some(v) =>
@@ -649,7 +608,12 @@ case class Schema(
     description: Option[String],
     properties: List[(String, Property)]
 ) {
-  def hasRequired = properties.exists(!_._2.typ.optional)
+  def hasRequired: Boolean = properties.exists(!_._2.typ.optional)
+
+  def hasArrays: Boolean = properties.exists(_._2.typ match {
+    case gcp.codegen.SchemaType.Array(_, _) => true
+    case _                                  => false
+  })
 
   // required properties first
   // references wihout properties are excluded
@@ -746,6 +710,10 @@ def camelToSnakeCase(camelCase: String): String = {
   val camelCaseRegex = "([A-Z][a-z]+)".r
   camelCaseRegex.replaceAllIn(camelCase, matched => "_" + matched.group(0).toLowerCase)
 }
+
+def implicitVal(dialect: Dialect) = dialect match
+  case Dialect.Scala3 => "given"
+  case Dialect.Scala2 => "implicit val"
 
 object Specs:
   given Reader[Specs] = reader[ujson.Obj].map(o =>

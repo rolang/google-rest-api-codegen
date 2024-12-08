@@ -1,7 +1,7 @@
 ThisBuild / description := "Google Cloud client code generator"
-ThisBuild / organization := "com.anymindgroup"
-ThisBuild / licenses := Seq(License.Apache2)
-ThisBuild / homepage := Some(url("https://anymindgroup.com"))
+ThisBuild / organization := "dev.rolang"
+ThisBuild / licenses := Seq(License.MIT)
+ThisBuild / homepage := Some(url("https://github.com/rolang/google-rest-api-codegen"))
 ThisBuild / scalaVersion := "3.3.4"
 ThisBuild / scalafmt := true
 ThisBuild / scalafmtSbtCheck := true
@@ -12,14 +12,17 @@ lazy val testSettings = Seq(
   scalacOptions -= "-Xfatal-warnings"
 )
 
-lazy val publishSettings = Seq(
-  credentials += {
-    for {
-      username <- sys.env.get("ARTIFACT_REGISTRY_USERNAME")
-      apiKey <- sys.env.get("ARTIFACT_REGISTRY_PASSWORD")
-    } yield Credentials("https://asia-maven.pkg.dev", "asia-maven.pkg.dev", username, apiKey)
-  }.getOrElse(Credentials(Path.userHome / ".ivy2" / ".credentials")),
-  publishTo := Some("AnyChat Maven" at "https://asia-maven.pkg.dev/anychat-staging/maven")
+lazy val publishSettings = List(
+  credentials += Credentials(
+    "Sonatype Nexus Repository Manager",
+    "oss.sonatype.org",
+    sys.env.getOrElse("SONATYPE_USERNAME", ""),
+    sys.env.getOrElse("SONATYPE_PASSWORD", "")
+  ),
+  usePgpKeyHex("537C76F3EFF1B9BE6FD238B442BD95234C9636F3"),
+  sonatypeCredentialHost := "oss.sonatype.org",
+  sonatypeRepository := s"https://${sonatypeCredentialHost.value}/service/local",
+  publishTo := sonatypePublishToBundle.value
 )
 
 lazy val noPublish = Seq(

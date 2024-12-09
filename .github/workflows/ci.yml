@@ -25,6 +25,8 @@ jobs:
     needs: [test]
     if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/master')
     steps:
+      - uses: actions/checkout@v2
+      - uses: coursier/cache-action@v6
       - name: Import signing key
         if: env.PGP_SECRET != '' && env.PGP_PASSPHRASE == ''
         env:

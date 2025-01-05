@@ -43,8 +43,9 @@ object GeneratorConfig:
       case ZioChunk => s"zio.Chunk[$t]"
   }
 
+  // potential dialect options
   enum Dialect:
-    case Scala3, Scala2
+    case Scala3
 
 enum SpecsInput:
   case StdIn
@@ -96,7 +97,6 @@ def generateBySpec(
               path,
               List(
                 config.dialect match
-                  case Dialect.Scala2 => s"package ${resourcesSplit.dropRight(1).mkString(".")}"
                   case Dialect.Scala3 => s"package ${config.resourcesPkg}",
                 "",
                 config.httpSource match {
@@ -104,7 +104,6 @@ def generateBySpec(
                   case HttpSource.Sttp3 => "import sttp.model.*\nimport sttp.client3.*"
                 },
                 config.dialect match
-                  case Dialect.Scala2 => s"package object ${resourcesSplit.last} {"
                   case Dialect.Scala3 => "",
                 s"val resourceRequest: ${
                     if config.httpSource == HttpSource.Sttp3 then "RequestT[Empty, Either[String, String], Any]"
@@ -112,7 +111,6 @@ def generateBySpec(
                   } = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
                 s"""val resourceBaseUrl: Uri = uri"${specs.baseUrl}"""",
                 config.dialect match
-                  case Dialect.Scala2 => "}"
                   case Dialect.Scala3 => ""
               ).mkString("\n")
             )
@@ -268,25 +266,24 @@ def resourceCode(
                 responseType(bodyType),
                 jsonCodec match
                   case JsonCodec.ZioJson => s"""|.response(
-                                                |  asStringAlways.mapWithMetadata {
-                                                |    case (body, metadata) => {
-                                                |      if (metadata.isSuccess) {
+                                                |  asStringAlways.mapWithMetadata((body, metadata) => {
+                                                |      if metadata.isSuccess then
                                                 |        body.fromJson[$bodyType]
-                                                |      } else Left(body)
+                                                |      else Left(body)
                                                 |    }
-                                                |  }
+                                                |  )
                                                 |)""".stripMargin
                   case JsonCodec.Jsoniter =>
                     s"""|.response(
-                        |  asByteArrayAlways.mapWithMetadata { case (bytes, metadata) =>
-                        |    if (metadata.isSuccess) {
+                        |  asByteArrayAlways.mapWithMetadata((bytes, metadata) =>
+                        |    if metadata.isSuccess then
                         |      try {
                         |        Right(readFromArray[$bodyType](bytes))
                         |      } catch {
                         |        case e: Throwable => Left(e.getMessage())
                         |      }
-                        |    } else Left(new String(bytes, java.nio.charset.StandardCharsets.UTF_8))
-                        |  }
+                        |    else Left(String(bytes, java.nio.charset.StandardCharsets.UTF_8))
+                        |  )
                         |)""".stripMargin
               )
             case _ => (responseType("String"), "")
@@ -356,7 +353,6 @@ def schemasCode(
       case Some(codecsPkg) =>
         dialect match
           case Dialect.Scala3 => s"import $codecsPkg.given"
-          case Dialect.Scala2 => s"import $codecsPkg.*"
       case _ => "",
     toSchemaClass(schema)
   ).mkString("\n")
@@ -723,7 +719,6 @@ def camelToSnakeCase(camelCase: String): String = {
 
 def implicitVal(dialect: Dialect) = dialect match
   case Dialect.Scala3 => "given"
-  case Dialect.Scala2 => "implicit val"
 
 object Specs:
   given Reader[Specs] = reader[ujson.Obj].map(o =>

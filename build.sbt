@@ -132,6 +132,41 @@ lazy val testProjects: CompositeProject = new CompositeProject {
     }
 }
 
+lazy val cliBinFile: File = {
+  val cliTarget = new File("modules/cli/target/bin")
+
+  def normalise(s: String) = s.toLowerCase.replaceAll("[^a-z0-9]+", "")
+  val props = sys.props.toMap
+  val os = normalise(props.getOrElse("os.name", "")) match {
+    case p if p.startsWith("linux")                         => "linux"
+    case p if p.startsWith("windows")                       => "windows"
+    case p if p.startsWith("osx") || p.startsWith("macosx") => "macosx"
+    case _                                                  => "unknown"
+  }
+
+  val arch = (
+    normalise(props.getOrElse("os.arch", "")),
+    props.getOrElse("sun.arch.data.model", "64")
+  ) match {
+    case ("amd64" | "x64" | "x8664" | "x86", bits) => s"x86_${bits}"
+    case ("aarch64" | "arm64", bits)               => s"aarch$bits"
+    case _                                         => "unknown"
+  }
+
+  val name = s"gcp-codegen-$arch-$os"
+
+  cliTarget / name
+}
+
+lazy val buildCliBinary = taskKey[File]("")
+buildCliBinary := {
+  val built = (cli / Compile / nativeLinkReleaseFast).value
+  val destZip = new File(s"${cliBinFile.getPath()}.zip")
+
+  IO.copyFile(built, cliBinFile)
+  cliBinFile
+}
+
 def codegenTask(
     specs: (String, String),
     httpSource: String,
@@ -139,46 +174,14 @@ def codegenTask(
     arrayType: String
 ) = Def.taskDyn {
   val logger = streams.value.log
-  val cliBin = {
-    val cliTarget = new File("modules/cli/target/bin")
-
-    def normalise(s: String) = s.toLowerCase.replaceAll("[^a-z0-9]+", "")
-    val props = sys.props.toMap
-    val os = normalise(props.getOrElse("os.name", "")) match {
-      case p if p.startsWith("linux")                         => "linux"
-      case p if p.startsWith("windows")                       => "windows"
-      case p if p.startsWith("osx") || p.startsWith("macosx") => "macosx"
-      case _                                                  => "unknown"
-    }
-
-    val arch = (
-      normalise(props.getOrElse("os.arch", "")),
-      props.getOrElse("sun.arch.data.model", "64")
-    ) match {
-      case ("amd64" | "x64" | "x8664" | "x86", bits) => s"x86_${bits}"
-      case ("aarch64" | "arm64", bits)               => s"aarch$bits"
-      case _                                         => "unknown"
-    }
-
-    val name = s"gcp-codegen-$arch-$os"
-
-    val cliDestBin = cliTarget / name
-    val built = (cli / Compile / nativeLinkReleaseFast).value
-    val destZip = new File(s"${cliDestBin.getPath()}.zip")
-
-    IO.copyFile(built, cliDestBin)
-
-    cliDestBin
-  }
+  val cliBin = cliBinFile
 
   Def.task {
     val (apiName, apiVersion) = specs
 
     val outDir = (Compile / sourceManaged).value
     val outPathRel = outDir.relativeTo(new File(".")).map(_.getPath()).getOrElse("")
-    val scalaV = scalaVersion.value
-    val outSrcDir = outDir / (if (scalaV.startsWith("3")) "scala-3" else "scala-2")
-    val dialect = if (scalaV.startsWith("3")) "Scala3" else "Scala2"
+    val outSrcDir = outDir / "scala"
 
     @scala.annotation.tailrec
     def listFilesRec(dir: List[File], res: List[File]): List[File] =
@@ -206,7 +209,6 @@ def codegenTask(
         s"--resources-pkg=$basePkgName.resources",
         s"--schemas-pkg=$basePkgName.schemas",
         s"--out-dir=${outSrcDir.getPath()}",
-        s"--dialect=$dialect",
         s"--http-source=$httpSource",
         s"--json-codec=$jsonCodec",
         s"--array-type=$arrayType"

@@ -53,10 +53,6 @@ private def argsToTask(args: Seq[String]): Either[String, Task] =
       .get("--json-codec")
       .flatMap(v => JsonCodec.values.find(_.toString().equalsIgnoreCase(v)))
       .toRight("Missing or invalid --json-codec")
-    dialect = argsMap
-      .get("--dialect")
-      .flatMap(v => Dialect.values.find(_.toString().equalsIgnoreCase(v)))
-      .getOrElse(Dialect.Scala3)
     arrayType <- argsMap.get("--array-type") match
       case None    => Right(ArrayType.List)
       case Some(v) => ArrayType.values.find(_.toString().equalsIgnoreCase(v)).toRight(s"Invalid array-type $v")
@@ -72,7 +68,7 @@ private def argsToTask(args: Seq[String]): Either[String, Task] =
       schemasPkg = schemasPkg,
       httpSource = httpSource,
       jsonCodec = jsonCodec,
-      dialect = dialect,
+      dialect = Dialect.Scala3,
       preprocess = s => {
         incResources.partitionMap(s => if s.startsWith("!") then Left(s.stripPrefix("!")) else Right(s)) match
           case (Nil, Nil)  => s

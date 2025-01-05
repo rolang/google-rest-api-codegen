@@ -18,7 +18,7 @@ jobs:
           power: true
       - name: Start up emulators
         run: docker compose up -d 
-      - run: sbt test
+      - run: sbt buildCliBinary test
   publish:
     runs-on: ubuntu-latest
     name: Publish Artifacts

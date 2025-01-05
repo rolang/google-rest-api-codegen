@@ -1,6 +1,7 @@
 # (Experimental) Google APIs client code generator
 
 Generates client code from Google's [disovery document](https://developers.google.com/discovery/v1/using).
+Currently generates code for Scala 3.
 
 ### Usage
 
@@ -14,7 +15,6 @@ Generates client code from Google's [disovery document](https://developers.googl
 | --specs             | Can be `stdin` or a path to the JSON file. | | |
 | --resources-pkg     | Target package for generated resources |  | |
 | --schemas-pkg       | Target package for generated schemas |  | |
-| --dialect           | Used dialect | `Scala3`, `Scala2` | `Scala3` |
 | --http-source       | Generated http source. | [Sttp4](https://sttp.softwaremill.com/en/latest), [Sttp3](https://sttp.softwaremill.com/en/stable) | |
 | --json-codec        | Generated JSON codec | [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)  | |
 | --array-type        | Collection type for JSON arrays | `List`, `Vector`, `Array`, `ZioChunk` | `List` |

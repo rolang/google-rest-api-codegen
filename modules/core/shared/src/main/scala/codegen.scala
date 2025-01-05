@@ -265,11 +265,12 @@ def resourceCode(
               (
                 responseType(bodyType),
                 jsonCodec match
-                  case JsonCodec.ZioJson => s"""|.response(
-                                                |  asStringAlways.mapWithMetadata((body, metadata) =>
-                                                |    if (metadata.isSuccess) then body.fromJson[$bodyType] else Left(body)
-                                                |  )
-                                                |)""".stripMargin
+                  case JsonCodec.ZioJson =>
+                    s"""|.response(
+                        |  asStringAlways.mapWithMetadata((body, metadata) =>
+                        |    if (metadata.isSuccess) then body.fromJson[$bodyType] else Left(body)
+                        |  )
+                        |)""".stripMargin
                   case JsonCodec.Jsoniter =>
                     s"""|.response(
                         |  asByteArrayAlways.mapWithMetadata((bytes, metadata) =>
@@ -288,8 +289,13 @@ def resourceCode(
           s"""|def ${toScalaName(k)}(${params.mkString(",\n")}): $resType = {$queryParams
                 |  resourceRequest.${v.httpMethod.toLowerCase()}($reqUri$addParams)$body$mapResponse
                 |}""".stripMargin
+        }
+        .mkString("\n", "\n\n", "\n") +
+      "}"
+  ).mkString("\n")
 
 def schemasCode(
+    schema: Schema,
     pkg: String,
     jsonCodec: JsonCodec,
     dialect: Dialect,

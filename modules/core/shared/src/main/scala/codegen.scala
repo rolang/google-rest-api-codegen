@@ -267,16 +267,26 @@ def resourceCode(
               (
                 responseType(bodyType),
                 jsonCodec match
-                  case JsonCodec.ZioJson => s".mapResponse(_.flatMap(_.fromJson[$bodyType]))"
+                  case JsonCodec.ZioJson => s"""|.response(
+                                                |  asStringAlways.mapWithMetadata {
+                                                |    case (body, metadata) => {
+                                                |      if (metadata.isSuccess) {
+                                                |        body.fromJson[$bodyType]
+                                                |      } else Left(body)
+                                                |    }
+                                                |  }
+                                                |)""".stripMargin
                   case JsonCodec.Jsoniter =>
                     s"""|.response(
-                        |  asByteArrayAlways.map(a =>
-                        |    try {
-                        |      Right(readFromArray[$bodyType](a))
-                        |    } catch {
-                        |      case e: Throwable => Left(e.getMessage())
-                        |    }
-                        |  )
+                        |  asByteArrayAlways.mapWithMetadata { case (bytes, metadata) =>
+                        |    if (metadata.isSuccess) {
+                        |      try {
+                        |        Right(readFromArray[$bodyType](bytes))
+                        |      } catch {
+                        |        case e: Throwable => Left(e.getMessage())
+                        |      }
+                        |    } else Left(new String(bytes, java.nio.charset.StandardCharsets.UTF_8))
+                        |  }
                         |)""".stripMargin
               )
             case _ => (responseType("String"), "")

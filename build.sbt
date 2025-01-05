@@ -32,15 +32,15 @@ lazy val noPublish = Seq(
   publish / skip := true
 )
 
-lazy val sttpClient4Version = "4.0.0-M19"
+lazy val sttpClient4Version = "4.0.0-M22"
 
-lazy val sttpClient3Version = "3.10.1"
+lazy val sttpClient3Version = "3.10.2"
 
-lazy val zioVersion = "2.1.13"
+lazy val zioVersion = "2.1.14"
 
 lazy val zioJsonVersion = "0.7.3"
 
-lazy val jsoniterVersion = "2.31.3"
+lazy val jsoniterVersion = "2.33.0"
 
 lazy val munitVersion = "1.0.2"
 

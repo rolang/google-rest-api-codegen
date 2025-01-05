@@ -41,5 +41,5 @@ codegen \
 
 Generate, compile and run tests for generated code
 ```shell
-sbt test
+sbt buildCliBinary test
 ```

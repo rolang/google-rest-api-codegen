@@ -266,23 +266,20 @@ def resourceCode(
                 responseType(bodyType),
                 jsonCodec match
                   case JsonCodec.ZioJson => s"""|.response(
-                                                |  asStringAlways.mapWithMetadata((body, metadata) => {
-                                                |      if metadata.isSuccess then
-                                                |        body.fromJson[$bodyType]
-                                                |      else Left(body)
-                                                |    }
+                                                |  asStringAlways.mapWithMetadata((body, metadata) =>
+                                                |    if (metadata.isSuccess) then body.fromJson[$bodyType] else Left(body)
                                                 |  )
                                                 |)""".stripMargin
                   case JsonCodec.Jsoniter =>
                     s"""|.response(
                         |  asByteArrayAlways.mapWithMetadata((bytes, metadata) =>
-                        |    if metadata.isSuccess then
+                        |    if (metadata.isSuccess) {
                         |      try {
                         |        Right(readFromArray[$bodyType](bytes))
                         |      } catch {
                         |        case e: Throwable => Left(e.getMessage())
                         |      }
-                        |    else Left(String(bytes, java.nio.charset.StandardCharsets.UTF_8))
+                        |    } else Left(String(bytes, java.nio.charset.StandardCharsets.UTF_8))
                         |  )
                         |)""".stripMargin
               )
@@ -291,13 +288,8 @@ def resourceCode(
           s"""|def ${toScalaName(k)}(${params.mkString(",\n")}): $resType = {$queryParams
                 |  resourceRequest.${v.httpMethod.toLowerCase()}($reqUri$addParams)$body$mapResponse
                 |}""".stripMargin
-        }
-        .mkString("\n", "\n\n", "\n") +
-      "}"
-  ).mkString("\n")
 
 def schemasCode(
-    schema: Schema,
     pkg: String,
     jsonCodec: JsonCodec,
     dialect: Dialect,

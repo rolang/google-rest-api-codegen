@@ -3,11 +3,12 @@ package gcp.codegen
 import java.nio.file.*
 import upickle.default.*
 import GeneratorConfig.*
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{Future, Await}
+import scala.concurrent.duration.*
 import java.io.File
 import scala.util.{Success, Try}
 import scala.jdk.CollectionConverters.*
+import scala.concurrent.ExecutionContext
 
 extension (p: Path)
   def /(o: Path) = Path.of(p.toString(), o.toString())
@@ -55,7 +56,7 @@ case class Task(
     specsInput: SpecsInput,
     config: GeneratorConfig
 ) {
-  def run: Future[Unit] = {
+  def run(using ExecutionContext): Future[List[File]] = {
     for {
       content <- specsInput match
         case SpecsInput.StdIn          => Future(Console.in.lines().iterator().asScala.mkString)
@@ -65,16 +66,18 @@ case class Task(
         specs = config.preprocess(specs),
         config = config
       )
-    } yield println(
-      s"Generated ${files.length} files in ${config.outDir} with httpSource: ${config.httpSource}, jsonCodec: ${config.jsonCodec}, arrayType: ${config.arrayType}"
-    )
+    } yield files
   }
+
+  def runAwait(timeout: Duration = 30.seconds, ec: ExecutionContext = ExecutionContext.global): List[File] =
+    given ExecutionContext = ec
+    Await.result(run, timeout)
 }
 
 def generateBySpec(
     specs: Specs,
     config: GeneratorConfig
-): Future[List[File]] = {
+)(using ExecutionContext): Future[List[File]] = {
   val resourcesSplit = config.resourcesPkg.split('.')
   val resourcesPath = config.outDir / resourcesSplit
   val schemasPath = config.outDir / config.schemasPkg.split('.')

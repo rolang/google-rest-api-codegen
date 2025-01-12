@@ -7,3 +7,4 @@ target/
 .bloop/
 metals.sbt
 .scala-build
+example/out

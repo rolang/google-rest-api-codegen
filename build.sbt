@@ -6,6 +6,20 @@ ThisBuild / scalaVersion := "3.3.4"
 ThisBuild / scalafmt := true
 ThisBuild / scalafmtSbtCheck := true
 ThisBuild / version ~= { v => if (v.contains('+')) s"${v.replace('+', '-')}-SNAPSHOT" else v }
+ThisBuild / scmInfo := Some(
+  ScmInfo(
+    url("https://github.com/rolang/google-rest-api-codegen"),
+    "scm:git@github.com:rolang/google-rest-api-codegen.git"
+  )
+)
+ThisBuild / developers := List(
+  Developer(
+    id = "rolang",
+    name = "Roman Langolf",
+    email = "rolang@pm.me",
+    url = url("https://rolang.dev")
+  )
+)
 
 lazy val testSettings = Seq(
   Compile / scalacOptions ++= Seq("-Xmax-inlines:64"),

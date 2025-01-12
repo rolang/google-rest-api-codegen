@@ -17,7 +17,7 @@ import scala.util.{Failure, Success}
         .ready(task.run, 30.seconds)
         .onComplete {
           case Failure(exception) => Console.err.println(s"Failure: ${exception.printStackTrace()}")
-          case Success(_)         => ()
+          case Success(files)     => println(s"Generated ${files.length} files")
         }
 
 private def argsToTask(args: Seq[String]): Either[String, Task] =

@@ -8,3 +8,4 @@ target/
 metals.sbt
 .scala-build
 example/out
+.env

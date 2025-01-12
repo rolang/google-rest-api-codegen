@@ -39,7 +39,7 @@ cd example && scala generate.scala
 ```
 See output in `example/out`.
 
-#### Command-line usage
+#### Command-line executable usage
 
 ##### Configuration parameters (currently supported):
 
@@ -56,10 +56,16 @@ See output in `example/out`.
 
 ##### Examples:
 
+_Command line binaries are not published (not yet).  
+A command line binary can be built from the source via `sbt buildCliBinary`.  
+The output directory is `modules/cli/target/bin`.  
+E.g. on Linux the output file will be like `modules/cli/target/bin/gcp-codegen-x86_64-linux`._
+
 ```shell
 curl 'https://pubsub.googleapis.com/$discovery/rest?version=v1' > pubsub_v1.json
 
-codegen \
+# the path to the executable may be different
+./modules/cli/target/bin/gcp-codegen-x86_64-linux \
  --out-dir=src/scala/main/generated \
  --specs=./pubsub_v1.json \
  --resources-pkg=gcp.pubsub.v1.resources \

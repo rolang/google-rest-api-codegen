@@ -1,3 +1,9 @@
+// for test runs using scala-cli
+//> using jvm system
+//> using scala 3.6.3
+//> using file ../../../../core/shared/src/main/scala/codegen.scala
+//> using dep com.lihaoyi::upickle:4.1.0
+
 package gcp.codegen.cli
 
 import gcp.codegen.*
@@ -31,41 +37,39 @@ private def argsToTask(args: Seq[String]): Either[String, Task] =
 
   for {
     outDir <- argsMap
-      .get("--out-dir")
+      .get("-out-dir")
       .map(p => Path.of(p))
-      .toRight("Missing --out-dir")
+      .toRight("Missing -out-dir")
     specs <- argsMap
-      .get("--specs")
+      .get("-specs")
       .map {
         case "stdin" => SpecsInput.StdIn
         case p       => SpecsInput.FilePath(Path.of(p))
       }
-      .toRight("Missing --specs")
-    resourcesPkg <- argsMap
-      .get("--resources-pkg")
-      .toRight("Missing --resources-pkg")
-    schemasPkg <- argsMap.get("--schemas-pkg").toRight("Missing --schemas-pkg")
+      .toRight("Missing -specs")
+    outPkg <- argsMap
+      .get("-out-pkg")
+      .toRight("Missing -out-pkg")
     httpSource <- argsMap
-      .get("--http-source")
+      .get("-http-source")
       .flatMap(v => HttpSource.values.find(_.toString().equalsIgnoreCase(v)))
-      .toRight("Missing or invalid --http-source")
+      .toRight("Missing or invalid -http-source")
     jsonCodec <- argsMap
-      .get("--json-codec")
+      .get("-json-codec")
       .flatMap(v => JsonCodec.values.find(_.toString().equalsIgnoreCase(v)))
-      .toRight("Missing or invalid --json-codec")
-    arrayType <- argsMap.get("--array-type") match
+      .toRight("Missing or invalid -json-codec")
+    arrayType <- argsMap.get("-array-type") match
       case None    => Right(ArrayType.List)
       case Some(v) => ArrayType.values.find(_.toString().equalsIgnoreCase(v)).toRight(s"Invalid array-type $v")
     incResources = argsMap
-      .get("--include-resources")
+      .get("-include-resources")
       .toList
       .flatMap(_.split(',').toList)
   } yield Task(
     specsInput = specs,
     config = GeneratorConfig(
       outDir = outDir,
-      resourcesPkg = resourcesPkg,
-      schemasPkg = schemasPkg,
+      outPkg = outPkg,
       httpSource = httpSource,
       jsonCodec = jsonCodec,
       dialect = Dialect.Scala3,

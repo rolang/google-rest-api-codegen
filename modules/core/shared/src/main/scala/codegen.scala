@@ -18,8 +18,7 @@ extension (p: Path)
 
 case class GeneratorConfig(
     outDir: Path,
-    resourcesPkg: String,
-    schemasPkg: String,
+    outPkg: String,
     httpSource: HttpSource,
     jsonCodec: JsonCodec,
     arrayType: ArrayType,
@@ -78,11 +77,14 @@ def generateBySpec(
     specs: Specs,
     config: GeneratorConfig
 )(using ExecutionContext): Future[List[File]] = {
-  val resourcesSplit = config.resourcesPkg.split('.')
+  val basePkgPath = config.outDir / config.outPkg.split('.')
+  val resourcesPkg = s"${config.outPkg}.resource"
+  val schemasPkg = s"${config.outPkg}.schema"
+  val resourcesSplit = resourcesPkg.split('.')
   val resourcesPath = config.outDir / resourcesSplit
-  val schemasPath = config.outDir / config.schemasPkg.split('.')
+  val schemasPath = config.outDir / schemasPkg.split('.')
   val commonCodecsObj = "codecs"
-  val commonCodecsPkg = config.schemasPkg + s".$commonCodecsObj"
+  val commonCodecsPkg = s"$schemasPkg.$commonCodecsObj"
   val commonCodecsPath = schemasPath / s"$commonCodecsObj.scala"
 
   for {
@@ -95,12 +97,43 @@ def generateBySpec(
       .sequence(
         List(
           Future {
+            val path = basePkgPath / s"${specs.name}.scala"
+            Files.writeString(
+              path,
+              List(
+                s"${toComment(List(s"${specs.title} ${specs.version}", specs.description, specs.documentationLink))}",
+                "",
+                config.dialect match
+                  case Dialect.Scala3 => s"package ${config.outPkg}",
+                "",
+                config.httpSource match {
+                  case HttpSource.Sttp4 => "import sttp.model.*\nimport sttp.client4.*"
+                  case HttpSource.Sttp3 => "import sttp.model.*\nimport sttp.client3.*"
+                },
+                "",
+                s"""val baseUrl: Uri = uri"${specs.baseUrl}"""",
+                s"""val basePath: String = "${specs.basePath}"""",
+                s"""val rootUrl: Uri = uri"${specs.rootUrl}"""",
+                "",
+                if specs.endpoints.nonEmpty then "enum Endpoint(val location: String, val url: Uri):" else "",
+                specs.endpoints
+                  .map(e =>
+                    s"""${toComment(
+                        Some(e.description)
+                      )}  case `${e.location}` extends Endpoint("${e.location}", uri"${e.endpointUrl}")""".stripMargin
+                  )
+                  .mkString("\n")
+              ).mkString("\n")
+            )
+            List(path.toFile())
+          },
+          Future {
             val path = resourcesPath / "resources.scala"
             Files.writeString(
               path,
               List(
                 config.dialect match
-                  case Dialect.Scala3 => s"package ${config.resourcesPkg}",
+                  case Dialect.Scala3 => s"package $resourcesPkg",
                 "",
                 config.httpSource match {
                   case HttpSource.Sttp4 => "import sttp.model.*\nimport sttp.client4.*"
@@ -112,7 +145,6 @@ def generateBySpec(
                     if config.httpSource == HttpSource.Sttp3 then "RequestT[Empty, Either[String, String], Any]"
                     else "PartialRequest[Either[String, String]]"
                   } = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
-                s"""val resourceBaseUrl: Uri = uri"${specs.baseUrl}"""",
                 config.dialect match
                   case Dialect.Scala3 => ""
               ).mkString("\n")
@@ -124,9 +156,10 @@ def generateBySpec(
               val resourceName = resourceKey.scalaName
               Future {
                 val code = resourceCode(
-                  pkg = resourceKey.pkgName(config.resourcesPkg),
-                  resourcesPkg = config.resourcesPkg,
-                  schemasPkg = config.schemasPkg,
+                  rootPkg = config.outPkg,
+                  pkg = resourceKey.pkgName(resourcesPkg),
+                  resourcesPkg = resourcesPkg,
+                  schemasPkg = schemasPkg,
                   baseUrl = specs.baseUrl,
                   resourceName = resourceName,
                   resource = resource,
@@ -145,7 +178,7 @@ def generateBySpec(
             commonCodecs <- Future {
               commonSchemaCodecs(
                 schemas = specs.schemas.filter(_._2.properties.nonEmpty),
-                pkg = config.schemasPkg,
+                pkg = schemasPkg,
                 objName = commonCodecsObj,
                 jsonCodec = config.jsonCodec,
                 dialect = config.dialect,
@@ -162,7 +195,7 @@ def generateBySpec(
                 Future {
                   val code = schemasCode(
                     schema = schema,
-                    pkg = config.schemasPkg,
+                    pkg = schemasPkg,
                     jsonCodec = config.jsonCodec,
                     dialect = config.dialect,
                     hasProps = p => specs.hasProps(p),
@@ -188,6 +221,7 @@ def toScalaName(n: String): String =
   else n.replaceAll("[^a-zA-Z0-9_]", "")
 
 def resourceCode(
+    rootPkg: String,
     pkg: String,
     resourcesPkg: String,
     schemasPkg: String,
@@ -206,8 +240,8 @@ def resourceCode(
     s"import $resourcesPkg.*",
     "",
     httpSource match {
-      case HttpSource.Sttp4 => "import sttp.model.Uri.PathSegment\nimport sttp.client4.*"
-      case HttpSource.Sttp3 => "import sttp.model.Uri.PathSegment\nimport sttp.client3.*"
+      case HttpSource.Sttp4 => "import sttp.model.Uri, sttp.model.Uri.PathSegment, sttp.client4.*"
+      case HttpSource.Sttp3 => "import sttp.model.Uri, sttp.model.Uri.PathSegment, sttp.client3.*"
     },
     jsonCodec match {
       case JsonCodec.ZioJson  => "import zio.json.*"
@@ -230,13 +264,14 @@ def resourceCode(
                     ) + "\")"
               )
 
-          val reqUri = s"resourceBaseUrl.addPathSegments(List(${pathSegments.mkString(", ")}))"
+          val reqUri = s"endpointUrl.addPathSegments(List(${pathSegments.mkString(", ")}))"
 
           val req = v.request.filter(_.schemaPath.forall(hasProps))
 
           val params =
-            v.scalaParameters.map((n, t) => s"$n: ${t.scalaType(arrType)}") :::
-              req.toList.map(r => s"request: ${r.scalaType(arrType)}")
+            v.scalaParameters.map((n, t) => s"${toComment(t.description)}$n: ${t.scalaType(arrType)}") :::
+              req.toList.map(r => s"request: ${r.scalaType(arrType)}") :::
+              List(s"endpointUrl: Uri = $rootPkg.baseUrl")
 
           val body = req match
             case None    => ""
@@ -289,7 +324,7 @@ def resourceCode(
               )
             case _ => (responseType("String"), "")
 
-          s"""|def ${toScalaName(k)}(${params.mkString(",\n")}): $resType = {$queryParams
+          s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {$queryParams
                 |  resourceRequest.${v.httpMethod.toLowerCase()}($reqUri$addParams)$body$mapResponse
                 |}""".stripMargin
         }
@@ -329,11 +364,9 @@ def schemasCode(
         |${s
          .scalaProperties(hasProps)
          .map { (n, t) =>
-           s"${t.description
-               .map { d =>
-                 d.replace("\n", "\n//").split("\\. ").filter(_.nonEmpty).mkString("    // ", ". \n    // ", "\n")
-               }
-               .getOrElse("")}$n: ${(if (t.optional) s"${t.scalaType(arrType)} = None" else t.scalaType(arrType))}"
+           s"${toComment(t.description)}$n: ${
+               (if (t.optional) s"${t.scalaType(arrType)} = None" else t.scalaType(arrType))
+             }"
          }
          .mkString("", ",\n", "")}
         |) {\n${`def toJsonString`(scalaName)}\n}\n
@@ -699,15 +732,25 @@ object ResourcePath:
       path.matches(regex)
     def hasMatch(v: Seq[String]): Boolean = v.exists(matches)
 
+case class Endpoint(endpointUrl: String, location: String, description: String) derives Reader
+
 case class Specs(
+    id: String,
     name: String,
+    title: String,
+    description: String,
+    revision: String,
+    documentationLink: String,
     protocol: String,
     ownerName: String,
     discoveryVersion: String,
     resources: Map[ResourcePath, Resource],
     version: String,
+    schemas: Map[SchemaPath, Schema],
+    rootUrl: String,
     baseUrl: String,
-    schemas: Map[SchemaPath, Schema]
+    basePath: String,
+    endpoints: List[Endpoint]
 ) {
   def hasProps(schemaName: SchemaPath): Boolean =
     schemas.get(schemaName).exists(_.properties.nonEmpty)
@@ -721,10 +764,25 @@ def camelToSnakeCase(camelCase: String): String = {
 def implicitVal(dialect: Dialect) = dialect match
   case Dialect.Scala3 => "given"
 
+// comment splitted into multipl lines
+private def toComment(content: Iterable[String]): String =
+  if content.isEmpty then ""
+  else
+    content
+      .flatMap(_.split('\n'))
+      .flatMap(_.split("\\. "))
+      .filter(_.trim.nonEmpty)
+      .mkString("    // ", ". \n    // ", "\n")
+
 object Specs:
   given Reader[Specs] = reader[ujson.Obj].map(o =>
     Specs(
+      id = o("id").str,
+      title = o("title").str,
+      description = o("description").str,
+      revision = o("revision").str,
       name = o("name").str,
+      documentationLink = o("documentationLink").str,
       protocol = o("protocol").str,
       ownerName = o("ownerName").str,
       discoveryVersion = o("discoveryVersion").str,
@@ -734,6 +792,9 @@ object Specs:
       ),
       version = o("version").str,
       baseUrl = o("baseUrl").str,
-      schemas = Schema.readSchemas(o("schemas").obj)
+      rootUrl = o("rootUrl").str,
+      schemas = Schema.readSchemas(o("schemas").obj),
+      basePath = o("basePath").str,
+      endpoints = o.value.get("endpoints").map(read[List[Endpoint]](_)).getOrElse(Nil)
     )
   )

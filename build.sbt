@@ -2,9 +2,7 @@ ThisBuild / description := "Google Cloud client code generator"
 ThisBuild / organization := "dev.rolang"
 ThisBuild / licenses := Seq(License.MIT)
 ThisBuild / homepage := Some(url("https://github.com/rolang/google-rest-api-codegen"))
-ThisBuild / scalaVersion := "3.3.4"
-ThisBuild / scalafmt := true
-ThisBuild / scalafmtSbtCheck := true
+ThisBuild / scalaVersion := "3.3.5"
 ThisBuild / version ~= { v => if (v.contains('+')) s"${v.replace('+', '-')}-SNAPSHOT" else v }
 ThisBuild / scmInfo := Some(
   ScmInfo(
@@ -46,7 +44,7 @@ lazy val noPublish = Seq(
   publish / skip := true
 )
 
-lazy val sttpClient4Version = "4.0.0-M22"
+lazy val sttpClient4Version = "4.0.0-RC1"
 
 lazy val sttpClient3Version = "3.10.2"
 
@@ -78,7 +76,7 @@ lazy val core = crossProject(JVMPlatform, NativePlatform)
   )
   .settings(
     libraryDependencies ++= Seq(
-      "com.lihaoyi" %%% "upickle" % "4.0.2"
+      "com.lihaoyi" %%% "upickle" % "4.1.0"
     )
   )
 
@@ -90,7 +88,8 @@ lazy val cli = project
   .settings(publishSettings)
   .settings(
     name := "gcp-codegen-cli",
-    moduleName := "gcp-codegen-cli"
+    moduleName := "gcp-codegen-cli",
+    nativeConfig := nativeConfig.value.withMultithreading(false)
   )
 
 def dependencyByConfig(httpSource: String, jsonCodec: String, arrayType: String): List[ModuleID] = {
@@ -219,13 +218,12 @@ def codegenTask(
     val cmd =
       List(
         s"./${cliBin.getPath()}",
-        s"--specs=${resourcePath(s"${apiName}_$apiVersion.json")}",
-        s"--resources-pkg=$basePkgName.resources",
-        s"--schemas-pkg=$basePkgName.schemas",
-        s"--out-dir=${outSrcDir.getPath()}",
-        s"--http-source=$httpSource",
-        s"--json-codec=$jsonCodec",
-        s"--array-type=$arrayType"
+        s"-specs=${resourcePath(s"${apiName}_$apiVersion.json")}",
+        s"-out-dir=${outSrcDir.getPath()}",
+        s"-out-pkg=$basePkgName",
+        s"-http-source=$httpSource",
+        s"-json-codec=$jsonCodec",
+        s"-array-type=$arrayType"
       ).mkString(" ")
 
     cmd ! ProcessLogger(l => logger.info(l))
@@ -234,7 +232,7 @@ def codegenTask(
 
     // formatting (may need to find another way...)
     logger.info(s"Formatting sources in $outPathRel...")
-    s"scala-cli fmt --scalafmt-conf=./.scalafmt.conf $outDir" ! ProcessLogger(_ => ()) // add logs when needed
+    s"scala fmt --scalafmt-conf=./.scalafmt.conf $outDir" ! ProcessLogger(_ => ()) // add logs when needed
     IO.delete(outDir / ".scala-build")
     logger.success(s"Formatting sources in $outPathRel done")
 

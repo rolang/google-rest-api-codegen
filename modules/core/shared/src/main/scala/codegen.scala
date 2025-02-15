@@ -78,8 +78,8 @@ def generateBySpec(
     config: GeneratorConfig
 )(using ExecutionContext): Future[List[File]] = {
   val basePkgPath = config.outDir / config.outPkg.split('.')
-  val resourcesPkg = s"${config.outPkg}.resource"
-  val schemasPkg = s"${config.outPkg}.schema"
+  val resourcesPkg = s"${config.outPkg}.resources"
+  val schemasPkg = s"${config.outPkg}.schemas"
   val resourcesSplit = resourcesPkg.split('.')
   val resourcesPath = config.outDir / resourcesSplit
   val schemasPath = config.outDir / schemasPkg.split('.')

@@ -232,7 +232,7 @@ def codegenTask(
 
     // formatting (may need to find another way...)
     logger.info(s"Formatting sources in $outPathRel...")
-    s"scala fmt --scalafmt-conf=./.scalafmt.conf $outDir" ! ProcessLogger(_ => ()) // add logs when needed
+    s"scala-cli fmt --scalafmt-conf=./.scalafmt.conf $outDir" ! ProcessLogger(_ => ()) // add logs when needed
     IO.delete(outDir / ".scala-build")
     logger.success(s"Formatting sources in $outPathRel done")
 

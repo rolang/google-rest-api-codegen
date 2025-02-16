@@ -17,13 +17,19 @@ import scala.util.{Failure, Success}
 
 @main def run(args: String*) =
   argsToTask(args) match
-    case Left(err) => Console.err.println(s"Invalid arguments: $err")
+    case Left(err) =>
+      Console.err.println(s"Invalid arguments: $err")
+      sys.exit(1)
     case Right(task) =>
       Await
         .ready(task.run, 30.seconds)
         .onComplete {
-          case Failure(exception) => Console.err.println(s"Failure: ${exception.printStackTrace()}")
-          case Success(files)     => println(s"Generated ${files.length} files")
+          case Failure(exception) =>
+            Console.err.println(s"Failure: ${exception.printStackTrace()}")
+            sys.exit(1)
+          case Success(files) =>
+            println(s"Generated ${files.length} files")
+            sys.exit(0)
         }
 
 private def argsToTask(args: Seq[String]): Either[String, Task] =

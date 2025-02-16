@@ -3,16 +3,29 @@
 ![Maven Central Version](https://img.shields.io/maven-central/v/dev.rolang/gcp-codegen_3)
 [![Sonatype Snapshots](https://img.shields.io/nexus/s/https/oss.sonatype.org/dev.rolang/gcp-codegen_3.svg?label=Sonatype%20Snapshot)](https://oss.sonatype.org/content/repositories/snapshots/dev/rolang/gcp-codegen_3/)
 
-Generates client code from Google's [disovery document](https://developers.google.com/discovery/v1/using).
-Currently generates code for Scala 3.
+⚠️ _This project is in an experimental stage (with a messy code base), use with care if you want to give it a try_.
+
+Generates client code from Google's [disovery document](https://developers.google.com/discovery/v1/using) for your Scala (3) tech stack.  
+Currently it provides following configurations for generated code:
+ - Http sources: [Sttp4](https://sttp.softwaremill.com/en/latest), [Sttp3](https://sttp.softwaremill.com/en/stable)
+ - JSON codecs: [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)
+ - JSON Array collection type: `List`, `Vector`, `Array`, `ZioChunk`
+
+__NOTE__: Generated code does not include authentication.
+
+If you're using [http4s](https://github.com/http4s/http4s) and [circe](https://github.com/circe/circe) you may also want to check some similar projects:
+ - [hamnis/google-discovery-scala](https://github.com/hamnis/google-discovery-scala)
+ - [armanbilge/gcp4s](https://github.com/armanbilge/gcp4s)
 
 ### Usage
+
+The generator can be used with any tool that can perform system calls to a command line executable or add Scala 3 dependencies (e.g. [scala command line](https://scala-cli.virtuslab.org/), [sbt 1](https://www.scala-sbt.org/1.x/docs/), [sbt 2](https://www.scala-sbt.org/2.x/docs/en/index.html), [mill](https://mill-build.org), etc.).  
 
 #### Usage via Scala command line example
 See example under [example/generate.scala](./example/generate.scala).
 
 ```scala
-//> using scala 3.6.2
+//> using scala 3.6.3
 //> using dep dev.rolang::gcp-codegen::0.0.1
 
 import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
@@ -22,8 +35,7 @@ import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
     specsInput = SpecsInput.FilePath(Path.of("pubsub_v1.json")),
     config = GeneratorConfig(
       outDir = Path.of("out"),
-      resourcesPkg = "example.pubsub.v1.resource",
-      schemasPkg = "example.pubsub.v1.schemas",
+      outPkg = "example.pubsub.v1",
       httpSource = HttpSource.Sttp4,
       jsonCodec = JsonCodec.Jsoniter,
       dialect = Dialect.Scala3,
@@ -35,7 +47,7 @@ import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 ```
 Run example:
 ```shell
-cd example && scala generate.scala
+cd example && scala generate.scala && scala fmt ./out
 ```
 See output in `example/out`.
 
@@ -45,14 +57,13 @@ See output in `example/out`.
 
 | Configuration       | Description | Options | Default |
 | ------------------- | ---------------- | ------- | --- |
-| --out-dir           | Ouput directory | | |
-| --specs             | Can be `stdin` or a path to the JSON file. | | |
-| --resources-pkg     | Target package for generated resources |  | |
-| --schemas-pkg       | Target package for generated schemas |  | |
-| --http-source       | Generated http source. | [Sttp4](https://sttp.softwaremill.com/en/latest), [Sttp3](https://sttp.softwaremill.com/en/stable) | |
-| --json-codec        | Generated JSON codec | [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)  | |
-| --array-type        | Collection type for JSON arrays | `List`, `Vector`, `Array`, `ZioChunk` | `List` |
-| --include-resources | Optional resource filter. | | |
+| -specs             | Can be `stdin` or a path to the JSON file. | | |
+| -out-dir           | Ouput directory | | |
+| -out-pkg           | Output package |  | |
+| -http-source       | Generated http source. | [Sttp4](https://sttp.softwaremill.com/en/latest), [Sttp3](https://sttp.softwaremill.com/en/stable) | |
+| -json-codec        | Generated JSON codec | [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)  | |
+| -array-type        | Collection type for JSON arrays | `List`, `Vector`, `Array`, `ZioChunk` | `List` |
+| -include-resources | Optional resource filter. | | |
 
 ##### Examples:
 

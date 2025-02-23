@@ -383,8 +383,8 @@ def resourceCode(
               )
             case _ => (responseType("String"), "")
 
-          s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {
-              |$queryParams$setReqUri
+          s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {$queryParams
+              |  $setReqUri
               |  resourceRequest.${v.httpMethod.toLowerCase()}(requestUri.addParams(params))$body$mapResponse
               |}""".stripMargin
         }

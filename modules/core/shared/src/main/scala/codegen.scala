@@ -309,7 +309,7 @@ def resourceCode(
               uploadProtocol.toList.map((typ, default) => s"uploadProtocol: $typ = \"$default\"") :::
               optParams.map((n, t) => s"${toComment(t.description)}$n: ${t.scalaType(arrType)} = None") :::
               List(
-                s"endpointUrl: Uri = $rootPkg.rootUrl",
+                s"endpointUrl: Uri = $rootPkg.baseUrl",
                 "commonQueryParams: QueryParameters = " + ((
                   v.mediaUpload,
                   commonQueryParams.collectFirst { case ("uploadType", Parameter(_, _, e: SchemaType.Enum, _, _)) => e }
@@ -327,7 +327,7 @@ def resourceCode(
                 "val requestUri = uploadProtocol match {",
                 m.protocols
                   .map((k, v) =>
-                    s"""case "$k" => endpointUrl.addPathSegments(List(${pathSegments(v.path).mkString(", ")}))"""
+                    s"""case "$k" => endpointUrl.withPathSegments(List(${pathSegments(v.path).mkString(", ")}))"""
                   )
                   .mkString("  ", "\n  ", ""),
                 "  }"

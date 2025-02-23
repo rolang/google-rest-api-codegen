@@ -396,7 +396,9 @@ def schemasCode(
         |${s
          .scalaProperties(hasProps)
          .map { (n, t) =>
-           val enumType = SchemaType.EnumType.Nominal(s"$scalaName.$n")
+           val enumType =
+             if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
+             else SchemaType.EnumType.Nominal(s"$scalaName.$n")
            s"${toComment(t.description)}$n: ${
                (if (t.optional) s"${t.scalaType(arrType, enumType)} = None" else t.scalaType(arrType, enumType))
              }"
@@ -440,7 +442,9 @@ def commonSchemaCodecs(
         .flatMap((sk, sv) =>
           sv.scalaProperties(hasProps)
             .collect { case (k, Property(_, SchemaType.Array(typ, _), _)) =>
-              val enumType = SchemaType.EnumType.Nominal(s"${sk.lastOption.getOrElse("")}.$k")
+              val enumType =
+                if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
+                else SchemaType.EnumType.Nominal(s"${sk.lastOption.getOrElse("")}.$k")
               typ.scalaType(arrType, enumType)
             }
         )
@@ -703,7 +707,6 @@ object SchemaType:
                   case _ =>
                     if !o.value.keySet.contains("properties") then
                       if Set("uploadType", "upload_protocol").exists(context.jsonPath.lastOption.contains) then
-                        println("checking uploadType")
                         """"([\w]+)"""".r
                           .findAllMatchIn(desc.getOrElse(""))
                           .map(_.group(1))

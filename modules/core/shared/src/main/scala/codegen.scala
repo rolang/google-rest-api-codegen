@@ -272,9 +272,10 @@ def resourceCode(
     s"object ${resourceName} {" +
       resource.methods
         .map { (k, v) =>
-          val pathSegments =
-            v.urlPath
+          def pathSegments(urlPath: String) =
+            urlPath
               .split("/")
+              .filter(_.nonEmpty)
               .map(s =>
                 "\\{(.*?)\\}".r.findAllIn(s).toList match
                   case Nil                => s"PathSegment(\"$s\")"
@@ -285,17 +286,52 @@ def resourceCode(
                     ) + "\")"
               )
 
-          val reqUri = s"endpointUrl.addPathSegments(List(${pathSegments.mkString(", ")}))"
+          val req = v.mediaUpload match
+            case None    => v.request.filter(_.schemaPath.forall(hasProps))
+            case Some(_) => None
 
-          val req = v.request.filter(_.schemaPath.forall(hasProps))
+          val uploadProtocol = v.mediaUpload match
+            case Some(m) =>
+              Some {
+                val protocols = m.protocols.keySet.toList.sortBy {
+                  case "simple" => 1
+                  case _        => 10
+                }
+                // type and default
+                (protocols.mkString("\"", "\" | \"", "\""), protocols.head)
+              }
+            case None => None
 
+          val (requiredParams, optParams) = v.scalaParameters.partition(_._2.required)
           val params =
-            v.scalaParameters.map((n, t) => s"${toComment(t.description)}$n: ${t.scalaType(arrType)}") :::
+            requiredParams.map((n, t) => s"${toComment(t.description)}$n: ${t.scalaType(arrType)}") :::
               req.toList.map(r => s"request: ${r.scalaType(arrType)}") :::
+              uploadProtocol.toList.map((typ, default) => s"uploadProtocol: $typ = \"$default\"") :::
+              optParams.map((n, t) => s"${toComment(t.description)}$n: ${t.scalaType(arrType)} = None") :::
               List(
-                s"endpointUrl: Uri = $rootPkg.baseUrl",
-                "commonQueryParams: QueryParameters = QueryParameters.empty"
+                s"endpointUrl: Uri = $rootPkg.rootUrl",
+                "commonQueryParams: QueryParameters = " + ((
+                  v.mediaUpload,
+                  commonQueryParams.collectFirst { case ("uploadType", Parameter(_, _, e: SchemaType.Enum, _, _)) => e }
+                ) match {
+                  case (Some(m), Some(ut)) => s"""QueryParameters(uploadType = Some("${ut.values.head.value}"))"""
+                  case _                   => "QueryParameters.empty"
+                })
               )
+
+          val setReqUri = v.mediaUpload match
+            case None =>
+              s"val requestUri = endpointUrl.addPathSegments(List(${pathSegments(v.urlPath).mkString(", ")}))"
+            case Some(m) =>
+              List(
+                "val requestUri = uploadProtocol match {",
+                m.protocols
+                  .map((k, v) =>
+                    s"""case "$k" => endpointUrl.addPathSegments(List(${pathSegments(v.path).mkString(", ")}))"""
+                  )
+                  .mkString("  ", "\n  ", ""),
+                "  }"
+              ).mkString("\n")
 
           val body = req match
             case None    => ""
@@ -348,8 +384,9 @@ def resourceCode(
             case _ => (responseType("String"), "")
 
           s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {$queryParams
-                |  resourceRequest.${v.httpMethod.toLowerCase()}(${reqUri}.addParams(params))$body$mapResponse
-                |}""".stripMargin
+              |  $setReqUri
+              |  resourceRequest.${v.httpMethod.toLowerCase()}(requestUri.addParams(params))$body$mapResponse
+              |}""".stripMargin
         }
         .mkString("\n", "\n\n", "\n") +
       "}"

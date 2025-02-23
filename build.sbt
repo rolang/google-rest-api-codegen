@@ -48,11 +48,11 @@ lazy val sttpClient4Version = "4.0.0-RC1"
 
 lazy val sttpClient3Version = "3.10.2"
 
-lazy val zioVersion = "2.1.14"
+lazy val zioVersion = "2.1.15"
 
-lazy val zioJsonVersion = "0.7.3"
+lazy val zioJsonVersion = "0.7.28"
 
-lazy val jsoniterVersion = "2.33.0"
+lazy val jsoniterVersion = "2.33.2"
 
 lazy val munitVersion = "1.0.2"
 
@@ -215,18 +215,20 @@ def codegenTask(
     IO.createDirectory(outSrcDir)
 
     val basePkgName = s"gcp.$apiName.$apiVersion.${httpSource}_${jsonCodec}_${arrayType}".toLowerCase()
-    val cmd =
-      List(
-        s"./${cliBin.getPath()}",
-        s"-specs=${resourcePath(s"${apiName}_$apiVersion.json")}",
-        s"-out-dir=${outSrcDir.getPath()}",
-        s"-out-pkg=$basePkgName",
-        s"-http-source=$httpSource",
-        s"-json-codec=$jsonCodec",
-        s"-array-type=$arrayType"
-      ).mkString(" ")
 
-    cmd ! ProcessLogger(l => logger.info(l))
+    val errs = scala.collection.mutable.ListBuffer.empty[String]
+    (List(
+      s"./${cliBin.getPath()}",
+      s"-specs=${resourcePath(s"${apiName}_$apiVersion.json")}",
+      s"-out-dir=${outSrcDir.getPath()}",
+      s"-out-pkg=$basePkgName",
+      s"-http-source=$httpSource",
+      s"-json-codec=$jsonCodec",
+      s"-array-type=$arrayType"
+    ).mkString(" ") ! ProcessLogger(l => logger.info(l), e => errs += e)) match {
+      case 0 => ()
+      case c => throw new InterruptedException(s"Failure on code generation: ${errs.mkString("\n")}")
+    }
 
     val files = listFilesRec(List(outDir), Nil)
 

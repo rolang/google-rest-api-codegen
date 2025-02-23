@@ -115,6 +115,24 @@ def generateBySpec(
                 s"""val basePath: String = "${specs.basePath}"""",
                 s"""val rootUrl: Uri = uri"${specs.rootUrl}"""",
                 "",
+                s"opaque type QueryParameters = Map[String, String]",
+                "object QueryParameters:",
+                "  extension (m: QueryParameters) def value: Map[String, String] = m",
+                "  val empty: QueryParameters = Map.empty",
+                "",
+                "  def apply(",
+                specs.queryParameters
+                  .map((k, v) =>
+                    s"""${{ toComment(v.description) }}  ${toScalaName(k)}: ${v.typ
+                        .withOptional(true)
+                        .scalaType(config.arrayType)} = None"""
+                  )
+                  .mkString("  ", ",\n  ", ""),
+                "): QueryParameters =",
+                specs.queryParameters
+                  .map((k, _) => s""" ${toScalaName(k)}.map(v => Map("$k" -> v.toString)).getOrElse(Map.empty)""")
+                  .mkString("  ", "++ \n  ", ""),
+                "",
                 if specs.endpoints.nonEmpty then "enum Endpoint(val location: String, val url: Uri):" else "",
                 specs.endpoints
                   .map(e =>
@@ -145,6 +163,7 @@ def generateBySpec(
                     if config.httpSource == HttpSource.Sttp3 then "RequestT[Empty, Either[String, String], Any]"
                     else "PartialRequest[Either[String, String]]"
                   } = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
+                s"export ${config.outPkg}.QueryParameters",
                 config.dialect match
                   case Dialect.Scala3 => ""
               ).mkString("\n")
@@ -166,7 +185,8 @@ def generateBySpec(
                   httpSource = config.httpSource,
                   jsonCodec = config.jsonCodec,
                   hasProps = p => specs.hasProps(p),
-                  arrType = config.arrayType
+                  arrType = config.arrayType,
+                  commonQueryParams = specs.queryParameters
                 )
                 val path = resourceKey.dirPath(resourcesPath) / s"$resourceName.scala"
                 Files.writeString(path, code)
@@ -231,7 +251,8 @@ def resourceCode(
     httpSource: HttpSource,
     jsonCodec: JsonCodec,
     arrType: ArrayType,
-    hasProps: SchemaPath => Boolean
+    hasProps: SchemaPath => Boolean,
+    commonQueryParams: Map[String, Parameter]
 ) =
   List(
     s"package $pkg",
@@ -271,24 +292,26 @@ def resourceCode(
           val params =
             v.scalaParameters.map((n, t) => s"${toComment(t.description)}$n: ${t.scalaType(arrType)}") :::
               req.toList.map(r => s"request: ${r.scalaType(arrType)}") :::
-              List(s"endpointUrl: Uri = $rootPkg.baseUrl")
+              List(
+                s"endpointUrl: Uri = $rootPkg.baseUrl",
+                "commonQueryParams: QueryParameters = QueryParameters.empty"
+              )
 
           val body = req match
             case None    => ""
             case Some(_) => """.body(request.toJsonString)"""
 
-          val queryParams =
-            if v.scalaQueryParams.nonEmpty then
-              "\n    val params = " + v.scalaQueryParams
-                .map {
-                  case (k, p) if p.required => s"""Map("$k" -> $k)"""
-                  case (k, p)               => s"""$k.map(p => Map("$k" -> p.toString)).getOrElse(Map.empty)"""
-                }
-                .mkString("", " ++ ", "\n")
-            else ""
-
-          val addParams =
-            if v.scalaQueryParams.nonEmpty then ".addParams(params)" else ""
+          val queryParams = "\n    val params = " +
+            (v.scalaQueryParams match
+              case Nil => "commonQueryParams.value"
+              case qParams =>
+                qParams
+                  .map {
+                    case (k, p) if p.required => s"""Map("$k" -> $k)"""
+                    case (k, p)               => s"""$k.map(p => Map("$k" -> p.toString)).getOrElse(Map.empty)"""
+                  }
+                  .mkString("", " ++ ", " ++ commonQueryParams.value\n")
+            )
 
           def responseType(t: String) =
             httpSource match
@@ -325,7 +348,7 @@ def resourceCode(
             case _ => (responseType("String"), "")
 
           s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {$queryParams
-                |  resourceRequest.${v.httpMethod.toLowerCase()}($reqUri$addParams)$body$mapResponse
+                |  resourceRequest.${v.httpMethod.toLowerCase()}(${reqUri}.addParams(params))$body$mapResponse
                 |}""".stripMargin
         }
         .mkString("\n", "\n\n", "\n") +
@@ -341,22 +364,31 @@ def schemasCode(
     arrType: ArrayType,
     commonCodecsPkg: Option[String]
 ): String = {
+  def enums =
+    schema.properties.collect:
+      case (k, Property(_, SchemaType.Array(e: SchemaType.Enum, _), _)) => k -> e
+      case (k, Property(_, e: SchemaType.Enum, _))                      => k -> e
+
   def `def toJsonString`(objName: String) = jsonCodec match
     case JsonCodec.ZioJson =>
       s"def toJsonString: String = $objName.jsonCodec.encodeJson(this, None).toString()"
     case JsonCodec.Jsoniter =>
       s"def toJsonString: String = writeToString(this)"
 
-  def jsonDecoder(objName: String) = jsonCodec match
-    case JsonCodec.ZioJson =>
-      s"""|object $objName {
-          |  ${implicitVal(dialect)} jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]
-          |}""".stripMargin
-    case JsonCodec.Jsoniter =>
-      s"""|object $objName {
-          |  ${implicitVal(dialect)} jsonCodec: JsonValueCodec[$objName] =
-          |    JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true).withDiscriminatorFieldName(None))
-          |}""".stripMargin
+  def jsonDecoder(objName: String) =
+    List(
+      s"object $objName {",
+      enums
+        .map((k, e) => s"enum ${toScalaName(k)}:\n  case ${e.values.map(v => toScalaName(v.value)).mkString(", ")}\n")
+        .mkString("\n"),
+      jsonCodec match
+        case JsonCodec.ZioJson =>
+          s"${implicitVal(dialect)} jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]"
+        case JsonCodec.Jsoniter =>
+          s"""|${implicitVal(dialect)} jsonCodec: JsonValueCodec[$objName] = 
+              |  JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true).withDiscriminatorFieldName(None))""".stripMargin,
+      "}"
+    ).mkString("\n")
 
   def toSchemaClass(s: Schema): String =
     val scalaName = s.id.scalaName
@@ -364,8 +396,9 @@ def schemasCode(
         |${s
          .scalaProperties(hasProps)
          .map { (n, t) =>
+           val enumType = SchemaType.EnumType.Nominal(s"$scalaName.$n")
            s"${toComment(t.description)}$n: ${
-               (if (t.optional) s"${t.scalaType(arrType)} = None" else t.scalaType(arrType))
+               (if (t.optional) s"${t.scalaType(arrType, enumType)} = None" else t.scalaType(arrType, enumType))
              }"
          }
          .mkString("", ",\n", "")}
@@ -401,15 +434,14 @@ def commonSchemaCodecs(
     hasProps: SchemaPath => Boolean,
     arrType: ArrayType
 ): Option[String] = {
-
   (jsonCodec, arrType) match
     case (JsonCodec.Jsoniter, ArrayType.ZioChunk) =>
       schemas.toList
-        .map(_._2)
-        .flatMap(
-          _.scalaProperties(hasProps)
-            .collect { case (_, Property(_, SchemaType.Array(typ, _), _)) =>
-              typ.scalaType(arrType)
+        .flatMap((sk, sv) =>
+          sv.scalaProperties(hasProps)
+            .collect { case (k, Property(_, SchemaType.Array(typ, _), _)) =>
+              val enumType = SchemaType.EnumType.Nominal(s"${sk.lastOption.getOrElse("")}.$k")
+              typ.scalaType(arrType, enumType)
             }
         )
         .distinct match
@@ -448,6 +480,9 @@ def commonSchemaCodecs(
 
 case class FlatPath(path: String, params: List[String])
 
+case class MediaUploadProtocol(multipart: Boolean, path: String) derives Reader
+case class MediaUpload(protocols: Map[String, MediaUploadProtocol], accept: List[String]) derives Reader
+
 case class Method(
     httpMethod: String,
     path: String,
@@ -455,7 +490,8 @@ case class Method(
     parameters: Map[String, Parameter],
     parameterOrder: List[String],
     response: Option[SchemaType],
-    request: Option[SchemaType] = None
+    request: Option[SchemaType] = None,
+    mediaUpload: Option[MediaUpload] = None
 ) {
   private lazy val flatPathParams: List[(String, Parameter)] = flatPath.toList.flatMap(p =>
     p.params.map(param =>
@@ -501,14 +537,17 @@ object Method:
       parameterOrder = o.value.get("parameterOrder").map(read[List[String]](_)).getOrElse(Nil),
       parameters = o.value
         .get("parameters")
-        .map(read[Map[String, Parameter]](_))
+        .map(v => v.obj.map((k, v) => k -> Parameter.read(k, v)).toMap)
         .getOrElse(Map.empty),
       response = o.value
         .get("response")
         .map(r => SchemaType.readType(SchemaPath.empty, r.obj)),
       request = o.value
         .get("request")
-        .map(r => SchemaType.readType(SchemaPath.empty, r.obj))
+        .map(r => SchemaType.readType(SchemaPath.empty, r.obj)),
+      mediaUpload = o.value.get("supportsMediaUpload").map(f => f.bool) match
+        case Some(true) => o.value.get("mediaUpload").map(m => read[MediaUpload](m))
+        case _          => None
     )
   }
 
@@ -541,19 +580,21 @@ case class Parameter(
 }
 
 object Parameter:
-  given Reader[Parameter] = reader[ujson.Obj].map { o =>
+  def read(name: String, o: ujson.Value) =
+    val typ = SchemaType.readType(SchemaPath(name), o.obj)
+    val typDesc = typ.description
     Parameter(
-      description = o.value.get("description").map(_.str),
+      description = o.obj.get("description").map(_.str).map(_ + typDesc.map("\n" + _).getOrElse("")),
       location = o("location").str,
-      typ = SchemaType.readType(SchemaPath.empty, o),
-      required = o.value.get("required").map(_.bool).getOrElse(false),
-      pattern = o.value.get("pattern").map(_.str)
+      typ = typ,
+      required = o.obj.get("required").map(_.bool).getOrElse(false),
+      pattern = o.obj.get("pattern").map(_.str)
     )
-  }
 
 case class Property(description: Option[String], typ: SchemaType, readOnly: Boolean = false) {
   def optional: Boolean = typ.optional || readOnly
-  def scalaType(arrType: ArrayType): String = typ.withOptional(optional).scalaType(arrType)
+  def scalaType(arrType: ArrayType, enumType: SchemaType.EnumType): String =
+    typ.withOptional(optional).scalaType(arrType, enumType)
   def schemaPath: Option[SchemaPath] = typ.schemaPath
   def nestedSchemaPath: Option[SchemaPath] = typ.schemaPath.filter(_.hasNested)
 }
@@ -575,8 +616,16 @@ enum SchemaType(val optional: Boolean):
   ) extends SchemaType(optional)
   case Array(items: SchemaType, override val optional: Boolean) extends SchemaType(optional)
   case Object(additionalProperties: SchemaType, override val optional: Boolean) extends SchemaType(optional)
+  case Enum(typ: String, values: List[SchemaType.EnumValue], override val optional: Boolean) extends SchemaType(true)
 
   private def toType(t: String) = if optional then s"Option[$t]" else t
+
+  def description: Option[String] = this match
+    case Enum(_, values, _) =>
+      values.collect { case SchemaType.EnumValue(n, desc) if desc.nonEmpty => s"$n: $desc" } match
+        case Nil => None
+        case v   => Some(v.mkString("\n"))
+    case _ => None
 
   def schemaPath: Option[SchemaPath] = this match
     case Ref(ref, _)           => Some(ref)
@@ -588,8 +637,12 @@ enum SchemaType(val optional: Boolean):
     case t: Primitive => t.copy(optional = o)
     case t: Array     => t.copy(optional = o)
     case t: Object    => t.copy(optional = o)
+    case t: Enum      => t.copy(optional = o)
 
-  def scalaType(arrayType: ArrayType): String = this match
+  def scalaType(
+      arrayType: ArrayType,
+      enumType: SchemaType.EnumType = SchemaType.EnumType.Literal
+  ): String = this match
     case Primitive("string", _, Some("google-datetime"))   => toType("java.time.OffsetDateTime")
     case Primitive("string", _, _)                         => toType("String")
     case Primitive("integer", _, Some("int32" | "uint32")) => toType("Int")
@@ -597,38 +650,69 @@ enum SchemaType(val optional: Boolean):
     case Primitive("number", _, Some("double" | "float"))  => toType("Double")
     case Primitive("boolean", _, _)                        => toType("Boolean")
     case Ref(ref, _)                                       => toType(ref.scalaName)
-    case Array(t, _)                                       => toType(arrayType.toScalaType(t.scalaType(arrayType)))
-    case Object(t, _)                                      => toType(s"Map[String, ${t.scalaType(arrayType)}]")
-    case _                                                 => toType("String")
+    case Array(t, _)  => toType(arrayType.toScalaType(t.scalaType(arrayType, enumType)))
+    case Object(t, _) => toType(s"Map[String, ${t.scalaType(arrayType)}]")
+    case Enum(_, values, _) =>
+      enumType match
+        case SchemaType.EnumType.Literal       => toType(values.map(v => v.value).mkString("\"", "\" | \"", "\""))
+        case SchemaType.EnumType.Nominal(name) => toType(name)
+    case _ => toType("String")
 
 object SchemaType:
+  case class EnumValue(value: String, enumDescription: String)
+
+  enum EnumType:
+    case Literal
+    case Nominal(prefix: String)
+
+  private def toPrimitive(o: ujson.Obj, optional: Boolean) = SchemaType.Primitive(
+    `type` = o("type").str,
+    optional = optional,
+    format = o.value.get("format").map(_.str)
+  )
+
   def readType(context: SchemaPath, o: ujson.Obj): SchemaType =
-    val optional = o.value
-      .get("description")
-      .map(_.str.toLowerCase())
+    val desc = o.value.get("description").map(_.str)
+    val optional = desc
+      .map(_.toLowerCase())
       .exists(d => d.startsWith("optional") || !d.startsWith("required"))
 
     o.value.get("items").map(_.obj) match
       case Some(v) =>
         SchemaType.Array(readType(context.add("items"), v), optional)
       case _ =>
-        o.value.get("additionalProperties").map(_.obj) match
-          case Some(v) =>
-            SchemaType.Object(
-              readType(context.add("additionalProperties"), v),
-              optional
+        (o.value.get("enum")) match
+          case Some(e) =>
+            SchemaType.Enum(
+              typ = o("type").str,
+              read[List[String]](e)
+                .zip(read[List[String]](o("enumDescriptions")))
+                .map((v, vd) => EnumValue(value = v, enumDescription = vd)),
+              false
             )
           case _ =>
-            o.value.get("$ref").map(_.str) match
-              case Some(ref) => SchemaType.Ref(SchemaPath(ref), optional)
+            o.value.get("additionalProperties").map(_.obj) match
+              case Some(v) =>
+                SchemaType.Object(
+                  readType(context.add("additionalProperties"), v),
+                  optional
+                )
               case _ =>
-                if !o.value.keySet.contains("properties") then
-                  SchemaType.Primitive(
-                    `type` = o("type").str,
-                    optional = optional,
-                    format = o.value.get("format").map(_.str)
-                  )
-                else SchemaType.Ref(context, optional)
+                o.value.get("$ref").map(_.str) match
+                  case Some(ref) => SchemaType.Ref(SchemaPath(ref), optional)
+                  case _ =>
+                    if !o.value.keySet.contains("properties") then
+                      if Set("uploadType", "upload_protocol").exists(context.jsonPath.lastOption.contains) then
+                        println("checking uploadType")
+                        """"([\w]+)"""".r
+                          .findAllMatchIn(desc.getOrElse(""))
+                          .map(_.group(1))
+                          .toList
+                          .collect { case v: String => EnumValue(value = v, enumDescription = "") } match
+                          case Nil    => toPrimitive(o, optional)
+                          case values => SchemaType.Enum(typ = o("type").str, optional = optional, values = values)
+                      else toPrimitive(o, optional)
+                    else SchemaType.Ref(context, optional)
 
 opaque type SchemaPath = Vector[String]
 object SchemaPath:
@@ -750,7 +834,8 @@ case class Specs(
     rootUrl: String,
     baseUrl: String,
     basePath: String,
-    endpoints: List[Endpoint]
+    endpoints: List[Endpoint],
+    queryParameters: Map[String, Parameter]
 ) {
   def hasProps(schemaName: SchemaPath): Boolean =
     schemas.get(schemaName).exists(_.properties.nonEmpty)
@@ -765,14 +850,14 @@ def implicitVal(dialect: Dialect) = dialect match
   case Dialect.Scala3 => "given"
 
 // comment splitted into multipl lines
-private def toComment(content: Iterable[String]): String =
+private def toComment(content: Iterable[String], indent: String = "  "): String =
   if content.isEmpty then ""
   else
     content
       .flatMap(_.split('\n'))
-      .flatMap(_.split("\\. "))
+      .flatMap(_.replace("e.g. ", "e.g.: ").split("\\. "))
       .filter(_.trim.nonEmpty)
-      .mkString("    // ", ". \n    // ", "\n")
+      .mkString(s"$indent// ", s"\n$indent// ", "\n")
 
 object Specs:
   given Reader[Specs] = reader[ujson.Obj].map(o =>
@@ -795,6 +880,9 @@ object Specs:
       rootUrl = o("rootUrl").str,
       schemas = Schema.readSchemas(o("schemas").obj),
       basePath = o("basePath").str,
-      endpoints = o.value.get("endpoints").map(read[List[Endpoint]](_)).getOrElse(Nil)
+      endpoints = o.value.get("endpoints").map(read[List[Endpoint]](_)).getOrElse(Nil),
+      queryParameters = o.value.get("parameters") match
+        case None    => Map.empty
+        case Some(v) => v.obj.map((k, v) => k -> Parameter.read(k, v)).filter(_._2.location == "query").toMap
     )
   )

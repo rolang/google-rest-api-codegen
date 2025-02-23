@@ -383,8 +383,8 @@ def resourceCode(
               )
             case _ => (responseType("String"), "")
 
-          s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {$queryParams
-              |  $setReqUri
+          s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {
+              |$queryParams$setReqUri
               |  resourceRequest.${v.httpMethod.toLowerCase()}(requestUri.addParams(params))$body$mapResponse
               |}""".stripMargin
         }
@@ -415,9 +415,14 @@ def schemasCode(
   def jsonDecoder(objName: String) =
     List(
       s"object $objName {",
-      enums
-        .map((k, e) => s"enum ${toScalaName(k)}:\n  case ${e.values.map(v => toScalaName(v.value)).mkString(", ")}\n")
-        .mkString("\n"),
+      // Jsoniter doesn't support derivation from Scala 3 union types
+      if jsonCodec == JsonCodec.Jsoniter then
+        enums
+          .map((k, e) =>
+            s"enum ${toScalaName(k)} {\n${e.values.map(v => s"${toComment(Some(v.enumDescription))}  case ${toScalaName(v.value)}").mkString("\n  ")}}\n"
+          )
+          .mkString("\n")
+      else "",
       jsonCodec match
         case JsonCodec.ZioJson =>
           s"${implicitVal(dialect)} jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]"
@@ -436,7 +441,7 @@ def schemasCode(
            val enumType =
              if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
              else SchemaType.EnumType.Nominal(s"$scalaName.$n")
-           s"${toComment(t.description)}$n: ${
+           s"${toComment(t.withTypeDescription)}$n: ${
                (if (t.optional) s"${t.scalaType(arrType, enumType)} = None" else t.scalaType(arrType, enumType))
              }"
          }
@@ -535,9 +540,10 @@ case class Method(
     mediaUpload: Option[MediaUpload] = None
 ) {
   private lazy val flatPathParams: List[(String, Parameter)] = flatPath.toList.flatMap(p =>
-    p.params.map(param =>
+    p.params.zipWithIndex.map((param, idx) =>
       param -> Parameter(
-        description = None,
+        // add descriptions of path prams to the first one
+        description = if idx == 0 then pathParamsDescription else None,
         location = "path",
         typ = SchemaType.Primitive("string", false, None),
         required = true,
@@ -545,6 +551,12 @@ case class Method(
       )
     )
   )
+
+  private def pathParamsDescription = parameters.toList
+    .collect { case _ -> Parameter(Some(d), "path", _, _, _) => d } match {
+    case Nil   => None
+    case descs => Some(descs.mkString("\n"))
+  }
 
   def urlPath: String = flatPath.map(_.path).getOrElse(path)
 
@@ -638,6 +650,13 @@ case class Property(description: Option[String], typ: SchemaType, readOnly: Bool
     typ.withOptional(optional).scalaType(arrType, enumType)
   def schemaPath: Option[SchemaPath] = typ.schemaPath
   def nestedSchemaPath: Option[SchemaPath] = typ.schemaPath.filter(_.hasNested)
+
+  def withTypeDescription = typ match
+    case SchemaType.Array(SchemaType.Enum(_, values, _), _) =>
+      description.toList ::: values.map(e => s"${e.value}: ${e.enumDescription}")
+    case gcp.codegen.SchemaType.Enum(_, values, _) =>
+      description.toList ::: values.map(e => s"${e.value}: ${e.enumDescription}")
+    case _ => description.toList
 }
 
 object Property:

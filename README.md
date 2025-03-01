@@ -26,7 +26,7 @@ See example under [example/generate.scala](./example/generate.scala).
 
 ```scala
 //> using scala 3.6.3
-//> using dep dev.rolang::gcp-codegen::0.0.1
+//> using dep dev.rolang::gcp-codegen::0.0.2
 
 import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 
@@ -77,13 +77,12 @@ curl 'https://pubsub.googleapis.com/$discovery/rest?version=v1' > pubsub_v1.json
 
 # the path to the executable may be different
 ./modules/cli/target/bin/gcp-codegen-x86_64-linux \
- --out-dir=src/scala/main/generated \
- --specs=./pubsub_v1.json \
- --resources-pkg=gcp.pubsub.v1.resources \
- --schemas-pkg=gcp.pubsub.v1.schemas \
- --http-source=sttp4 \
- --json-codec=jsoniter \
- --include-resources='projects.*,!projects.snapshots' # optional filters
+  -out-dir=src/scala/main/generated \
+  -specs=./pubsub_v1.json \
+  -out-pkg=gcp.pubsub.v1 \
+  -http-source=sttp4 \
+  -json-codec=jsoniter \
+  -include-resources='projects.*,!projects.snapshots' # optional filters
 ```
 
 ### Building and testing

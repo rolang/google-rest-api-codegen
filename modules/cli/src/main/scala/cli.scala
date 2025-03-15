@@ -1,6 +1,6 @@
 // for test runs using scala-cli
 //> using jvm system
-//> using scala 3.6.3
+//> using scala 3.6.4
 //> using file ../../../../core/shared/src/main/scala/codegen.scala
 //> using dep com.lihaoyi::upickle:4.1.0
 

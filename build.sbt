@@ -46,11 +46,11 @@ lazy val noPublish = Seq(
 
 lazy val sttpClient4Version = "4.0.0-RC1"
 
-lazy val sttpClient3Version = "3.10.2"
+lazy val sttpClient3Version = "3.10.3"
 
-lazy val zioVersion = "2.1.15"
+lazy val zioVersion = "2.1.16"
 
-lazy val zioJsonVersion = "0.7.28"
+lazy val zioJsonVersion = "0.7.39"
 
 lazy val jsoniterVersion = "2.33.2"
 
@@ -65,6 +65,16 @@ lazy val root = (project in file("."))
     cli
   )
   .aggregate(testProjects.componentProjects.map(p => LocalProject(p.id)) *)
+  .settings(noPublish)
+
+// for supporting code inspection / testing of generated code via test_gen.sh script
+lazy val testLocal = (project in file("test-local"))
+  .settings(
+    libraryDependencies ++= (
+      dependencyByConfig("Sttp4", "Jsoniter", "ZioChunk")
+        ++ dependencyByConfig("Sttp3", "ZioJson", "List")
+    )
+  )
   .settings(noPublish)
 
 lazy val core = crossProject(JVMPlatform, NativePlatform)
@@ -92,21 +102,23 @@ lazy val cli = project
     nativeConfig := nativeConfig.value.withMultithreading(false)
   )
 
-def dependencyByConfig(httpSource: String, jsonCodec: String, arrayType: String): List[ModuleID] = {
+def dependencyByConfig(httpSource: String, jsonCodec: String, arrayType: String): Seq[ModuleID] = {
   (httpSource match {
-    case "Sttp3" => List("com.softwaremill.sttp.client3" %% "core" % sttpClient3Version)
-    case "Sttp4" => List("com.softwaremill.sttp.client4" %% "core" % sttpClient4Version)
-    case _       => Nil
-  }) ::: (jsonCodec match {
+    case "Sttp3" => Seq("com.softwaremill.sttp.client3" %% "core" % sttpClient3Version)
+    case "Sttp4" => Seq("com.softwaremill.sttp.client4" %% "core" % sttpClient4Version)
+    case other   => throw new InterruptedException(s"Invalid http source: $other")
+  }) ++ (jsonCodec match {
     case "Jsoniter" =>
-      List(
+      Seq(
         "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core" % jsoniterVersion,
         "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % jsoniterVersion % "compile-internal"
       )
-    case "ZioJson" => List("dev.zio" %% "zio-json" % zioJsonVersion)
-  }) ::: (arrayType match {
-    case "ZioChunk" => List("dev.zio" %% "zio" % zioVersion)
-    case _          => Nil
+    case "ZioJson" => Seq("dev.zio" %% "zio-json" % zioJsonVersion)
+    case other     => throw new InterruptedException(s"Invalid json codec: $other")
+  }) ++ (arrayType match {
+    case "ZioChunk"                  => Seq("dev.zio" %% "zio" % zioVersion)
+    case "List" | "Vector" | "Array" => Nil
+    case other                       => throw new InterruptedException(s"Invalid array type: $other")
   })
 }
 

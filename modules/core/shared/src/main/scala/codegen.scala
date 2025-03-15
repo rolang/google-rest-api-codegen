@@ -154,8 +154,13 @@ def generateBySpec(
                   case Dialect.Scala3 => s"package $resourcesPkg",
                 "",
                 config.httpSource match {
-                  case HttpSource.Sttp4 => "import sttp.model.*\nimport sttp.client4.*"
+                  case HttpSource.Sttp4 =>
+                    "import sttp.model.*\nimport sttp.client4.*, sttp.client4.ResponseException.{DeserializationException, UnexpectedStatusCode}"
                   case HttpSource.Sttp3 => "import sttp.model.*\nimport sttp.client3.*"
+                },
+                config.jsonCodec match {
+                  case JsonCodec.ZioJson  => "import zio.json.*"
+                  case JsonCodec.Jsoniter => "import com.github.plokhotnyuk.jsoniter_scala.core.*"
                 },
                 config.dialect match
                   case Dialect.Scala3 => "",
@@ -163,9 +168,46 @@ def generateBySpec(
                     if config.httpSource == HttpSource.Sttp3 then "RequestT[Empty, Either[String, String], Any]"
                     else "PartialRequest[Either[String, String]]"
                   } = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
+                "",
                 s"export ${config.outPkg}.QueryParameters",
-                config.dialect match
-                  case Dialect.Scala3 => ""
+                "",
+                (config.httpSource, config.jsonCodec) match
+                  case (HttpSource.Sttp4, JsonCodec.Jsoniter) =>
+                    """|def asJson[T : JsonValueCodec]: ResponseAs[Either[ResponseException[String], T]] =
+                       |  asByteArrayAlways.mapWithMetadata((bytes, metadata) =>
+                       |    if metadata.isSuccess then
+                       |      try {
+                       |        Right(readFromArray[T](bytes))
+                       |      } catch {
+                       |        case e: Exception =>
+                       |          Left(DeserializationException(String(bytes, java.nio.charset.StandardCharsets.UTF_8), e, metadata))
+                       |      }
+                       |    else Left(UnexpectedStatusCode(String(bytes, java.nio.charset.StandardCharsets.UTF_8), metadata))
+                       |  )""".stripMargin
+                  case (HttpSource.Sttp3, JsonCodec.Jsoniter) =>
+                    """|def asJson[T : JsonValueCodec]:  ResponseAs[Either[ResponseException[String, Exception], T], Any] =
+                       |  asByteArrayAlways.mapWithMetadata((bytes, metadata) =>
+                       |    if metadata.isSuccess then
+                       |      try {
+                       |        Right(readFromArray[T](bytes))
+                       |      } catch {
+                       |        case e: Exception =>
+                       |          Left(DeserializationException(String(bytes, java.nio.charset.StandardCharsets.UTF_8), e))
+                       |      }
+                       |    else Left(HttpError(String(bytes, java.nio.charset.StandardCharsets.UTF_8), metadata.code))
+                       |  )""".stripMargin
+                  case (HttpSource.Sttp4, JsonCodec.ZioJson) =>
+                    """|def asJson[T : JsonDecoder]: ResponseAs[Either[ResponseException[String], T]] =
+                       |  asStringAlways.mapWithMetadata((body, metadata) =>
+                       |     if metadata.isSuccess then body.fromJson[T].left.map(e => DeserializationException(body, Exception(e), metadata))
+                       |     else Left(UnexpectedStatusCode(body, metadata))
+                       |  )""".stripMargin
+                  case (HttpSource.Sttp3, JsonCodec.ZioJson) =>
+                    """|def asJson[T : JsonDecoder]: ResponseAs[Either[ResponseException[String, Exception], T], Any] =
+                       |  asStringAlways.mapWithMetadata((body, metadata) =>
+                       |     if metadata.isSuccess then body.fromJson[T].left.map(e => DeserializationException(body, Exception(e)))
+                       |     else Left(HttpError(body, metadata.code))
+                       |  )""".stripMargin
               ).mkString("\n")
             )
             List(path.toFile())
@@ -254,20 +296,17 @@ def resourceCode(
     hasProps: SchemaPath => Boolean,
     commonQueryParams: Map[String, Parameter]
 ) =
+  val sttpClientPkg = httpSource match
+    case HttpSource.Sttp4 => "sttp.client4"
+    case HttpSource.Sttp3 => "sttp.client3"
+
   List(
     s"package $pkg",
     "",
     s"import $schemasPkg.*",
     s"import $resourcesPkg.*",
     "",
-    httpSource match {
-      case HttpSource.Sttp4 => "import sttp.model.Uri, sttp.model.Uri.PathSegment, sttp.client4.*"
-      case HttpSource.Sttp3 => "import sttp.model.Uri, sttp.model.Uri.PathSegment, sttp.client3.*"
-    },
-    jsonCodec match {
-      case JsonCodec.ZioJson  => "import zio.json.*"
-      case JsonCodec.Jsoniter => "import com.github.plokhotnyuk.jsoniter_scala.core.*"
-    },
+    s"import sttp.model.Uri, sttp.model.Uri.PathSegment, $sttpClientPkg.*",
     "",
     s"object ${resourceName} {" +
       resource.methods
@@ -351,9 +390,10 @@ def resourceCode(
 
           def responseType(t: String) =
             httpSource match
-              case HttpSource.Sttp4 => s"Request[Either[String, $t]]"
+              case HttpSource.Sttp4 =>
+                s"Request[Either[${if t == "String" then "String" else "ResponseException[String]"}, $t]]"
               case HttpSource.Sttp3 =>
-                s"RequestT[Identity, Either[String, $t], Any]"
+                s"RequestT[Identity, Either[${if t == "String" then "String" else "ResponseException[String, Exception]"}, $t], Any]"
 
           val (resType, mapResponse) = v.response match
             case Some(r) if r.schemaPath.forall(hasProps) =>
@@ -361,25 +401,7 @@ def resourceCode(
 
               (
                 responseType(bodyType),
-                jsonCodec match
-                  case JsonCodec.ZioJson =>
-                    s"""|.response(
-                        |  asStringAlways.mapWithMetadata((body, metadata) =>
-                        |    if (metadata.isSuccess) then body.fromJson[$bodyType] else Left(body)
-                        |  )
-                        |)""".stripMargin
-                  case JsonCodec.Jsoniter =>
-                    s"""|.response(
-                        |  asByteArrayAlways.mapWithMetadata((bytes, metadata) =>
-                        |    if (metadata.isSuccess) {
-                        |      try {
-                        |        Right(readFromArray[$bodyType](bytes))
-                        |      } catch {
-                        |        case e: Throwable => Left(e.getMessage())
-                        |      }
-                        |    } else Left(String(bytes, java.nio.charset.StandardCharsets.UTF_8))
-                        |  )
-                        |)""".stripMargin
+                s".response(asJson[$bodyType])"
               )
             case _ => (responseType("String"), "")
 

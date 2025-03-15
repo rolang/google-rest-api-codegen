@@ -9,3 +9,4 @@ metals.sbt
 .scala-build
 example/out
 .env
+test-local

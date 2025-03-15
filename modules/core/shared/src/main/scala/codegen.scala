@@ -253,17 +253,28 @@ def generateBySpec(
                   List(commonCodecsPath.toFile())
             }
             schemas <- Future
-              .traverse(specs.schemas.filter(_._2.properties.nonEmpty)) { (schemaPath, schema) =>
+              .traverse(specs.schemas) { (schemaPath, schema) =>
                 Future {
-                  val code = schemasCode(
-                    schema = schema,
-                    pkg = schemasPkg,
-                    jsonCodec = config.jsonCodec,
-                    dialect = config.dialect,
-                    hasProps = p => specs.hasProps(p),
-                    arrType = config.arrayType,
-                    commonCodecsPkg = if commonCodecs.nonEmpty && schema.hasArrays then Some(commonCodecsPkg) else None
-                  )
+                  val code =
+                    (if schema.properties.nonEmpty then
+                       schemasCode(
+                         schema = schema,
+                         pkg = schemasPkg,
+                         jsonCodec = config.jsonCodec,
+                         dialect = config.dialect,
+                         hasProps = p => specs.hasProps(p),
+                         arrType = config.arrayType,
+                         commonCodecsPkg =
+                           if commonCodecs.nonEmpty && schema.hasArrays then Some(commonCodecsPkg) else None
+                       )
+                     else
+                       // create a type alias for objects without properties
+                       val comment = toComment(schema.description)
+                       s"""|package $schemasPkg
+                           |
+                           |${comment}type ${schema.id.scalaName} = Option[""]""".stripMargin
+                    )
+
                   val path = schemasPath / s"${schemaPath.scalaName}.scala"
                   Files.writeString(path, code)
                   path.toFile()

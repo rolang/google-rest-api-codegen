@@ -272,7 +272,7 @@ def generateBySpec(
                        val comment = toComment(schema.description)
                        s"""|package $schemasPkg
                            |
-                           |${comment}type ${schema.id.scalaName} = """"".stripMargin
+                           |${comment}type ${schema.id.scalaName} = Option[""]""".stripMargin
                     )
 
                   val path = schemasPath / s"${schemaPath.scalaName}.scala"

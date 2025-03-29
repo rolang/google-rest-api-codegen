@@ -207,6 +207,20 @@ def generateBySpec(
                        |  asStringAlways.mapWithMetadata((body, metadata) =>
                        |     if metadata.isSuccess then body.fromJson[T].left.map(e => DeserializationException(body, Exception(e)))
                        |     else Left(HttpError(body, metadata.code))
+                       |  )""".stripMargin,
+                "",
+                config.httpSource match
+                  case HttpSource.Sttp4 =>
+                    """|def asEmptyResponse: ResponseAs[Either[ResponseException[String], String]] =
+                       |  asStringAlways.mapWithMetadata((body, metadata) =>
+                       |     if metadata.isSuccess then Right(body)
+                       |     else Left(UnexpectedStatusCode(body, metadata))
+                       |  )""".stripMargin
+                  case HttpSource.Sttp3 =>
+                    """|def asEmptyResponse: ResponseAs[Either[ResponseException[String, Exception], String], Any] =
+                       |  asStringAlways.mapWithMetadata((body, metadata) =>
+                       |    if metadata.isSuccess then Right(body)
+                       |    else Left(HttpError(body, metadata.code))
                        |  )""".stripMargin
               ).mkString("\n")
             )
@@ -402,9 +416,9 @@ def resourceCode(
           def responseType(t: String) =
             httpSource match
               case HttpSource.Sttp4 =>
-                s"Request[Either[${if t == "String" then "String" else "ResponseException[String]"}, $t]]"
+                s"Request[Either[ResponseException[String], $t]]"
               case HttpSource.Sttp3 =>
-                s"RequestT[Identity, Either[${if t == "String" then "String" else "ResponseException[String, Exception]"}, $t], Any]"
+                s"RequestT[Identity, Either[ResponseException[String, Exception], $t], Any]"
 
           val (resType, mapResponse) = v.response match
             case Some(r) if r.schemaPath.forall(hasProps) =>
@@ -414,7 +428,7 @@ def resourceCode(
                 responseType(bodyType),
                 s".response(asJson[$bodyType])"
               )
-            case _ => (responseType("String"), "")
+            case _ => (responseType("String"), ".response(asEmptyResponse)")
 
           s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {$queryParams
               |  $setReqUri

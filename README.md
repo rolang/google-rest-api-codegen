@@ -1,7 +1,6 @@
 # (Experimental) Google APIs client code generator
 
 ![Maven Central Version](https://img.shields.io/maven-central/v/dev.rolang/gcp-codegen_3)
-[![Sonatype Snapshots](https://img.shields.io/nexus/s/https/oss.sonatype.org/dev.rolang/gcp-codegen_3.svg?label=Sonatype%20Snapshot)](https://oss.sonatype.org/content/repositories/snapshots/dev/rolang/gcp-codegen_3/)
 
 ⚠️ _This project is in an experimental stage (with a messy code base), use with care if you want to give it a try_.
 
@@ -25,8 +24,8 @@ The generator can be used with any tool that can perform system calls to a comma
 See example under [example/generate.scala](./example/generate.scala).
 
 ```scala
-//> using scala 3.6.3
-//> using dep dev.rolang::gcp-codegen::0.0.2
+//> using scala 3.7.0
+//> using dep dev.rolang::gcp-codegen::0.0.5
 
 import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 

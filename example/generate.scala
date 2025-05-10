@@ -1,5 +1,5 @@
-//> using scala 3.6.3
-//> using dep dev.rolang::gcp-codegen::0.0.2
+//> using scala 3.7.0
+//> using dep dev.rolang::gcp-codegen::0.0.5
 
 import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 

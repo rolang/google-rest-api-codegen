@@ -2,8 +2,9 @@ ThisBuild / description := "Google Cloud client code generator"
 ThisBuild / organization := "dev.rolang"
 ThisBuild / licenses := Seq(License.MIT)
 ThisBuild / homepage := Some(url("https://github.com/rolang/google-rest-api-codegen"))
-ThisBuild / scalaVersion := "3.3.5"
+ThisBuild / scalaVersion := "3.3.6"
 ThisBuild / version ~= { v => if (v.contains('+')) s"${v.replace('+', '-')}-SNAPSHOT" else v }
+ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / scmInfo := Some(
   ScmInfo(
     url("https://github.com/rolang/google-rest-api-codegen"),
@@ -25,15 +26,7 @@ lazy val testSettings = Seq(
 )
 
 lazy val publishSettings = List(
-  credentials += Credentials(
-    "Sonatype Nexus Repository Manager",
-    "oss.sonatype.org",
-    sys.env.getOrElse("SONATYPE_USERNAME", ""),
-    sys.env.getOrElse("SONATYPE_PASSWORD", "")
-  ),
-  usePgpKeyHex("537C76F3EFF1B9BE6FD238B442BD95234C9636F3"),
-  sonatypeCredentialHost := "oss.sonatype.org",
-  sonatypeRepository := s"https://${sonatypeCredentialHost.value}/service/local",
+  sonatypeCredentialHost := xerial.sbt.Sonatype.sonatypeCentralHost,
   publishTo := sonatypePublishToBundle.value
 )
 

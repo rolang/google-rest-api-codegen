@@ -19,6 +19,7 @@ ThisBuild / developers := List(
     url = url("https://rolang.dev")
   )
 )
+ThisBuild / sonatypeCredentialHost := xerial.sbt.Sonatype.sonatypeCentralHost
 
 lazy val testSettings = Seq(
   Compile / scalacOptions ++= Seq("-Xmax-inlines:64"),
@@ -26,7 +27,6 @@ lazy val testSettings = Seq(
 )
 
 lazy val publishSettings = List(
-  sonatypeCredentialHost := xerial.sbt.Sonatype.sonatypeCentralHost,
   publishTo := sonatypePublishToBundle.value
 )
 

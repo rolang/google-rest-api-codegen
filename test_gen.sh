@@ -4,7 +4,7 @@
 # runs code generator via scala-cli for given config
 # will ouput code under test-local/src/main/scala
 
-spec=pubsub
+spec=aiplatform
 json_codec=jsoniter
 http_source=sttp4
 array_type=list

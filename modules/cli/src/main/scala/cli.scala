@@ -1,8 +1,8 @@
 // for test runs using scala-cli
 //> using jvm system
-//> using scala 3.6.4
+//> using scala 3.7.1
 //> using file ../../../../core/shared/src/main/scala/codegen.scala
-//> using dep com.lihaoyi::upickle:4.1.0
+//> using dep com.lihaoyi::upickle:4.2.1
 
 package gcp.codegen.cli
 
@@ -13,7 +13,6 @@ import GeneratorConfig.*
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.*
-import scala.util.{Failure, Success}
 
 @main def run(args: String*) =
   argsToTask(args) match
@@ -21,16 +20,14 @@ import scala.util.{Failure, Success}
       Console.err.println(s"Invalid arguments: $err")
       sys.exit(1)
     case Right(task) =>
-      Await
-        .ready(task.run, 30.seconds)
-        .onComplete {
-          case Failure(exception) =>
-            Console.err.println(s"Failure: ${exception.printStackTrace()}")
-            sys.exit(1)
-          case Success(files) =>
-            println(s"Generated ${files.length} files")
-            sys.exit(0)
-        }
+      try
+        val files = Await.result(task.run, 30.seconds)
+        println(s"Generated ${files.length} files")
+        sys.exit(0)
+      catch
+        case err: Throwable =>
+          Console.err.println(s"Failure: ${err.getMessage()}")
+          sys.exit(1)
 
 private def argsToTask(args: Seq[String]): Either[String, Task] =
   val argsMap = args.toList

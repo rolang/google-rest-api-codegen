@@ -2,7 +2,7 @@ ThisBuild / description := "Google Cloud client code generator"
 ThisBuild / organization := "dev.rolang"
 ThisBuild / licenses := Seq(License.MIT)
 ThisBuild / homepage := Some(url("https://github.com/rolang/google-rest-api-codegen"))
-ThisBuild / scalaVersion := "3.3.6"
+ThisBuild / scalaVersion := "3.7.1"
 ThisBuild / version ~= { v => if (v.contains('+')) s"${v.replace('+', '-')}-SNAPSHOT" else v }
 ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / scmInfo := Some(
@@ -37,9 +37,7 @@ lazy val noPublish = Seq(
   publish / skip := true
 )
 
-lazy val sttpClient4Version = "4.0.0-RC1"
-
-lazy val sttpClient3Version = "3.10.3"
+lazy val sttpClient4Version = "4.0.9"
 
 lazy val zioVersion = "2.1.16"
 
@@ -63,10 +61,7 @@ lazy val root = (project in file("."))
 // for supporting code inspection / testing of generated code via test_gen.sh script
 lazy val testLocal = (project in file("test-local"))
   .settings(
-    libraryDependencies ++= (
-      dependencyByConfig("Sttp4", "Jsoniter", "ZioChunk")
-        ++ dependencyByConfig("Sttp3", "ZioJson", "List")
-    )
+    libraryDependencies ++= dependencyByConfig("Sttp4", "Jsoniter", "ZioChunk")
   )
   .settings(noPublish)
 
@@ -97,7 +92,6 @@ lazy val cli = project
 
 def dependencyByConfig(httpSource: String, jsonCodec: String, arrayType: String): Seq[ModuleID] = {
   (httpSource match {
-    case "Sttp3" => Seq("com.softwaremill.sttp.client3" %% "core" % sttpClient3Version)
     case "Sttp4" => Seq("com.softwaremill.sttp.client4" %% "core" % sttpClient4Version)
     case other   => throw new InterruptedException(s"Invalid http source: $other")
   }) ++ (jsonCodec match {
@@ -125,7 +119,7 @@ lazy val testProjects: CompositeProject = new CompositeProject {
         "iamcredentials" -> "v1",
         "redis" -> "v1"
       )
-      httpSource <- Seq("Sttp4", "Sttp3")
+      httpSource <- Seq("Sttp4")
       jsonCodec <- Seq("ZioJson", "Jsoniter")
       arrayType <- Seq("ZioChunk", "List")
       id = s"test-$apiName-$apiVersion-${httpSource}-${jsonCodec}-${arrayType}".toLowerCase()
@@ -180,8 +174,6 @@ lazy val cliBinFile: File = {
 lazy val buildCliBinary = taskKey[File]("")
 buildCliBinary := {
   val built = (cli / Compile / nativeLinkReleaseFast).value
-  val destZip = new File(s"${cliBinFile.getPath()}.zip")
-
   IO.copyFile(built, cliBinFile)
   cliBinFile
 }
@@ -239,8 +231,17 @@ def codegenTask(
     val files = listFilesRec(List(outDir), Nil)
 
     // formatting (may need to find another way...)
-    logger.info(s"Formatting sources in $outPathRel...")
-    s"scala-cli fmt --scalafmt-conf=./.scalafmt.conf $outDir" ! ProcessLogger(_ => ()) // add logs when needed
+    val fmtCmd = s"scala-cli fmt --scalafmt-conf=./.scalafmt.conf ${outDir.absolutePath}"
+    logger.info(s"Formatting with '$fmtCmd'")
+    val fmtErrs = scala.collection.mutable.ListBuffer.empty[String]
+    fmtCmd ! ProcessLogger(
+      _ => (),
+      e => fmtErrs += e
+    ) match {
+      case 0 => ()
+      case c => throw new InterruptedException(s"Failure on code formatting: ${errs.mkString("\n")}")
+    }
+
     IO.delete(outDir / ".scala-build")
     logger.success(s"Formatting sources in $outPathRel done")
 

@@ -6,7 +6,7 @@
 
 Generates client code from Google's [disovery document](https://developers.google.com/discovery/v1/using) for your Scala (3) tech stack.  
 Currently it provides following configurations for generated code:
- - Http sources: [Sttp4](https://sttp.softwaremill.com/en/latest), [Sttp3](https://sttp.softwaremill.com/en/stable)
+ - Http sources: [Sttp4](https://sttp.softwaremill.com/en/latest)
  - JSON codecs: [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)
  - JSON Array collection type: `List`, `Vector`, `Array`, `ZioChunk`
 
@@ -24,8 +24,8 @@ The generator can be used with any tool that can perform system calls to a comma
 See example under [example/generate.scala](./example/generate.scala).
 
 ```scala
-//> using scala 3.7.0
-//> using dep dev.rolang::gcp-codegen::0.0.5
+//> using scala 3.7.1
+//> using dep dev.rolang::gcp-codegen::0.0.7
 
 import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 
@@ -59,7 +59,7 @@ See output in `example/out`.
 | -specs             | Can be `stdin` or a path to the JSON file. | | |
 | -out-dir           | Ouput directory | | |
 | -out-pkg           | Output package |  | |
-| -http-source       | Generated http source. | [Sttp4](https://sttp.softwaremill.com/en/latest), [Sttp3](https://sttp.softwaremill.com/en/stable) | |
+| -http-source       | Generated http source. | [Sttp4](https://sttp.softwaremill.com/en/stable) | |
 | -json-codec        | Generated JSON codec | [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)  | |
 | -array-type        | Collection type for JSON arrays | `List`, `Vector`, `Array`, `ZioChunk` | `List` |
 | -include-resources | Optional resource filter. | | |

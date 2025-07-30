@@ -235,11 +235,9 @@ def generateBySpec(
                   pkg = resourceKey.pkgName(resourcesPkg),
                   resourcesPkg = resourcesPkg,
                   schemasPkg = schemasPkg,
-                  baseUrl = specs.baseUrl,
                   resourceName = resourceName,
                   resource = resource,
                   httpSource = config.httpSource,
-                  jsonCodec = config.jsonCodec,
                   hasProps = p => specs.hasProps(p),
                   arrType = config.arrayType,
                   commonQueryParams = specs.queryParameters
@@ -304,19 +302,22 @@ def generateBySpec(
 val scalaKeyWords = Set("type", "import", "val", "object", "enum", "export")
 
 def toScalaName(n: String): String =
-  if scalaKeyWords.contains(n) then s"`$n`"
-  else n.replaceAll("[^a-zA-Z0-9_]", "")
+  n match
+    // to fix a compiler warning like
+    // import looks like a language import, but refers to something else: object language in object GoogleCloudAiplatformV1ExecutableCode
+    case "language" => "Language"
+    case _ =>
+      if scalaKeyWords.contains(n) then s"`$n`"
+      else n.replaceAll("[^a-zA-Z0-9_]", "")
 
 def resourceCode(
     rootPkg: String,
     pkg: String,
     resourcesPkg: String,
     schemasPkg: String,
-    baseUrl: String,
     resourceName: String,
     resource: Resource,
     httpSource: HttpSource,
-    jsonCodec: JsonCodec,
     arrType: ArrayType,
     hasProps: SchemaPath => Boolean,
     commonQueryParams: Map[String, Parameter]
@@ -335,7 +336,7 @@ def resourceCode(
     "",
     s"object ${resourceName} {" +
       resource.methods
-        .map { (k, v) =>
+        .map { (k, method) =>
           def pathSegments(urlPath: String) =
             urlPath
               .split("/")
@@ -350,11 +351,11 @@ def resourceCode(
                     ) + "\")"
               )
 
-          val req = v.mediaUpload match
-            case None    => v.request.filter(_.schemaPath.forall(hasProps))
+          val req = method.mediaUploads match
+            case None    => method.request.filter(_.schemaPath.forall(hasProps))
             case Some(_) => None
 
-          val uploadProtocol = v.mediaUpload match
+          val uploadProtocol = method.mediaUploads match
             case Some(m) =>
               Some {
                 val protocols = m.protocols.keySet.toList.sortBy {
@@ -366,7 +367,7 @@ def resourceCode(
               }
             case None => None
 
-          val (requiredParams, optParams) = v.scalaParameters.partition(_._2.required)
+          val (requiredParams, optParams) = method.scalaParameters.partition(_._2.required)
           val params =
             requiredParams.map((n, t) => s"${toComment(t.description)}$n: ${t.scalaType(arrType)}") :::
               req.toList.map(r => s"request: ${r.scalaType(arrType)}") :::
@@ -375,7 +376,7 @@ def resourceCode(
               List(
                 s"endpointUrl: Uri = $rootPkg.baseUrl",
                 "commonQueryParams: QueryParameters = " + ((
-                  v.mediaUpload,
+                  method.mediaUploads,
                   commonQueryParams.collectFirst { case ("uploadType", Parameter(_, _, e: SchemaType.Enum, _, _)) => e }
                 ) match {
                   case (Some(m), Some(ut)) => s"""QueryParameters(uploadType = Some("${ut.values.head.value}"))"""
@@ -383,9 +384,9 @@ def resourceCode(
                 })
               )
 
-          val setReqUri = v.mediaUpload match
+          val setReqUri = method.mediaUploads match
             case None =>
-              s"val requestUri = endpointUrl.addPathSegments(List(${pathSegments(v.urlPath).mkString(", ")}))"
+              s"val requestUri = endpointUrl.addPathSegments(List(${pathSegments(method.urlPath).mkString(", ")}))"
             case Some(m) =>
               List(
                 "val requestUri = uploadProtocol match {",
@@ -402,7 +403,7 @@ def resourceCode(
             case Some(_) => """.body(request.toJsonString)"""
 
           val queryParams = "\n    val params = " +
-            (v.scalaQueryParams match
+            (method.scalaQueryParams match
               case Nil => "commonQueryParams.value"
               case qParams =>
                 qParams
@@ -420,7 +421,7 @@ def resourceCode(
               case HttpSource.Sttp3 =>
                 s"RequestT[Identity, Either[ResponseException[String, Exception], $t], Any]"
 
-          val (resType, mapResponse) = v.response match
+          val (resType, mapResponse) = method.response match
             case Some(r) if r.schemaPath.forall(hasProps) =>
               val bodyType = r.scalaType(arrType)
 
@@ -432,7 +433,7 @@ def resourceCode(
 
           s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {$queryParams
               |  $setReqUri
-              |  resourceRequest.${v.httpMethod.toLowerCase()}(requestUri.addParams(params))$body$mapResponse
+              |  resourceRequest.${method.httpMethod.toLowerCase()}(requestUri.addParams(params))$body$mapResponse
               |}""".stripMargin
         }
         .mkString("\n", "\n\n", "\n") +
@@ -584,7 +585,7 @@ case class Method(
     parameterOrder: List[String],
     response: Option[SchemaType],
     request: Option[SchemaType] = None,
-    mediaUpload: Option[MediaUpload] = None
+    private val mediaUpload: Option[MediaUpload] = None
 ) {
   private lazy val flatPathParams: List[(String, Parameter)] = flatPath.toList.flatMap(p =>
     p.params.zipWithIndex.map((param, idx) =>
@@ -606,6 +607,20 @@ case class Method(
   }
 
   def urlPath: String = flatPath.map(_.path).getOrElse(path)
+
+  def mediaUploads: Option[MediaUpload] = mediaUpload.map(m =>
+    m.copy(protocols =
+      m.protocols.view
+        .mapValues(p =>
+          // map the path to flatPath on placeholders with pattern like {+var_name} if the same is found in method path
+          // need a better solution for this
+          "\\{(\\+.*?)\\}".r.findAllIn(p.path).toList match
+            case v :: Nil if path.contains(v) => p.copy(path = flatPath.map(_.path).getOrElse(p.path))
+            case _                            => p
+        )
+        .toMap
+    )
+  )
 
   // filter out path params if flatPath params are given
   private lazy val pathParams: List[(String, Parameter)] =

@@ -302,8 +302,13 @@ def generateBySpec(
 val scalaKeyWords = Set("type", "import", "val", "object", "enum", "export")
 
 def toScalaName(n: String): String =
-  if scalaKeyWords.contains(n) then s"`$n`"
-  else n.replaceAll("[^a-zA-Z0-9_]", "")
+  n match
+    // to fix a compiler warning like
+    // import looks like a language import, but refers to something else: object language in object GoogleCloudAiplatformV1ExecutableCode
+    case "language" => "Language"
+    case _ =>
+      if scalaKeyWords.contains(n) then s"`$n`"
+      else n.replaceAll("[^a-zA-Z0-9_]", "")
 
 def resourceCode(
     rootPkg: String,

@@ -255,7 +255,6 @@ def generateBySpec(
                 pkg = schemasPkg,
                 objName = commonCodecsObj,
                 jsonCodec = config.jsonCodec,
-                dialect = config.dialect,
                 hasProps = p => specs.hasProps(p),
                 arrType = config.arrayType
               ) match
@@ -301,14 +300,11 @@ def generateBySpec(
 
 val scalaKeyWords = Set("type", "import", "val", "object", "enum", "export")
 
+def toScalaTypeName(n: String): String = toScalaName(n.capitalize)
+
 def toScalaName(n: String): String =
-  n match
-    // to fix a compiler warning like
-    // import looks like a language import, but refers to something else: object language in object GoogleCloudAiplatformV1ExecutableCode
-    case "language" => "Language"
-    case _ =>
-      if scalaKeyWords.contains(n) then s"`$n`"
-      else n.replaceAll("[^a-zA-Z0-9_]", "")
+  if scalaKeyWords.contains(n) then s"`$n`"
+  else n.replaceAll("[^a-zA-Z0-9_]", "")
 
 def resourceCode(
     rootPkg: String,
@@ -467,16 +463,16 @@ def schemasCode(
       if jsonCodec == JsonCodec.Jsoniter then
         enums
           .map((k, e) =>
-            s"enum ${toScalaName(k)} {\n${e.values.map(v => s"${toComment(Some(v.enumDescription))}  case ${toScalaName(v.value)}").mkString("\n  ")}}\n"
+            s"  enum ${toScalaTypeName(k)} {\n${e.values.map(v => s"${toComment(Some(v.enumDescription), "    ")}    case ${toScalaName(v.value)}").mkString("\n  ")}\n  }\n"
           )
           .mkString("\n")
       else "",
       jsonCodec match
         case JsonCodec.ZioJson =>
-          s"${implicitVal(dialect)} jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]"
+          s"  given jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]"
         case JsonCodec.Jsoniter =>
-          s"""|${implicitVal(dialect)} jsonCodec: JsonValueCodec[$objName] = 
-              |  JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true).withDiscriminatorFieldName(None))""".stripMargin,
+          s"""|  given jsonCodec: JsonValueCodec[$objName] = 
+              |    JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true).withDiscriminatorFieldName(None))""".stripMargin,
       "}"
     ).mkString("\n")
 
@@ -488,7 +484,7 @@ def schemasCode(
          .map { (n, t) =>
            val enumType =
              if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
-             else SchemaType.EnumType.Nominal(s"$scalaName.$n")
+             else SchemaType.EnumType.Nominal(s"$scalaName.${toScalaTypeName(n)}")
            s"${toComment(t.withTypeDescription)}  $n: ${
                (if (t.optional) s"${t.scalaType(arrType, enumType)} = None" else t.scalaType(arrType, enumType))
              }"
@@ -522,7 +518,6 @@ def commonSchemaCodecs(
     pkg: String,
     objName: String,
     jsonCodec: JsonCodec,
-    dialect: Dialect,
     hasProps: SchemaPath => Boolean,
     arrType: ArrayType
 ): Option[String] = {
@@ -534,7 +529,7 @@ def commonSchemaCodecs(
             .collect { case (k, Property(_, SchemaType.Array(typ, _), _)) =>
               val enumType =
                 if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
-                else SchemaType.EnumType.Nominal(s"${sk.lastOption.getOrElse("")}.$k")
+                else SchemaType.EnumType.Nominal(s"${sk.lastOption.getOrElse("")}.${toScalaTypeName(k)}")
               typ.scalaType(arrType, enumType)
             }
         )
@@ -552,17 +547,17 @@ def commonSchemaCodecs(
               s"object $objName {",
               props
                 .map { t =>
-                  val prefix = implicitVal(dialect) + " " + toScalaName(t + "ChunkCodec")
+                  val prefix = "  given " + toScalaName(t + "ChunkCodec")
                   s"""|${prefix}: JsonValueCodec[Chunk[$t]] = new JsonValueCodec[Chunk[$t]] {
-                      |  val arrCodec: JsonValueCodec[Array[$t]] = JsonCodecMaker.make
+                      |    val arrCodec: JsonValueCodec[Array[$t]] = JsonCodecMaker.make
                       |
-                      |  override val nullValue: Chunk[$t] = Chunk.empty
+                      |    override val nullValue: Chunk[$t] = Chunk.empty
                       |
-                      |  override def decodeValue(in: JsonReader, default: Chunk[$t]): Chunk[$t] =
-                      |    Chunk.fromArray(arrCodec.decodeValue(in, default.toArray))
+                      |    override def decodeValue(in: JsonReader, default: Chunk[$t]): Chunk[$t] =
+                      |      Chunk.fromArray(arrCodec.decodeValue(in, default.toArray))
                       |
-                      |  override def encodeValue(x: Chunk[$t], out: JsonWriter): Unit =
-                      |    arrCodec.encodeValue(x.toArray, out)
+                      |    override def encodeValue(x: Chunk[$t], out: JsonWriter): Unit =
+                      |      arrCodec.encodeValue(x.toArray, out)
                       |}""".stripMargin
                 }
                 .mkString("\n\n"),
@@ -691,7 +686,7 @@ case class Parameter(
     required: Boolean = false,
     pattern: Option[String] = None
 ) {
-  def scalaType(arrType: ArrayType) = typ.withOptional(!required).scalaType(arrType)
+  def scalaType(arrType: ArrayType): String = typ.withOptional(!required).scalaType(arrType)
 }
 
 object Parameter:
@@ -842,7 +837,7 @@ object SchemaPath:
 
   extension (s: SchemaPath)
     def scalaName: String =
-      s.filter(!Set("items", "properties").contains(_)).map(_.capitalize).mkString
+      s.filter(!Set("items", "properties").contains(_)).map(toScalaTypeName(_)).mkString
 
     def add(nested: String): SchemaPath = s.appended(nested)
     def hasNested: Boolean = s.size > 1
@@ -927,7 +922,7 @@ object ResourcePath:
   def apply(pp: Vector[String], p: String): ResourcePath = pp :+ p
   extension (r: ResourcePath)
     def add(p: String): ResourcePath = r :+ p
-    def scalaName: String = r.last.capitalize
+    def scalaName: String = toScalaTypeName(r.last)
     def pkgPath: Vector[String] = r.dropRight(1).map(camelToSnakeCase)
     def pkgName(base: String): String = s"$base${if pkgPath.nonEmpty then pkgPath.mkString(".", ".", "") else ""}"
     def dirPath(base: Path): Path = base / pkgPath
@@ -966,9 +961,6 @@ def camelToSnakeCase(camelCase: String): String = {
   val camelCaseRegex = "([A-Z][a-z]+)".r
   camelCaseRegex.replaceAllIn(camelCase, matched => "_" + matched.group(0).toLowerCase)
 }
-
-def implicitVal(dialect: Dialect) = dialect match
-  case Dialect.Scala3 => "given"
 
 // comment splitted into multipl lines
 private def toComment(content: Iterable[String], indent: String = "  "): String =

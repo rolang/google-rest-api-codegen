@@ -37,7 +37,6 @@ import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
       outPkg = "example.pubsub.v1",
       httpSource = HttpSource.Sttp4,
       jsonCodec = JsonCodec.Jsoniter,
-      dialect = Dialect.Scala3,
       arrayType = ArrayType.List,
       preprocess = specs => specs
     )

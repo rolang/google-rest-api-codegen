@@ -18,5 +18,4 @@ scala-cli modules/cli/src/main/scala/cli.scala -- \
     -out-pkg=gcp.${spec}.v1.${http_source}.${json_codec}.$array_type \
     -http-source=$http_source \
     -json-codec=$json_codec \
-    -array-type=$array_type && \
-scala-cli fmt $out_dir
+    -array-type=$array_type

@@ -22,13 +22,12 @@ case class GeneratorConfig(
     httpSource: HttpSource,
     jsonCodec: JsonCodec,
     arrayType: ArrayType,
-    dialect: Dialect,
     preprocess: Specs => Specs = s => s
 )
 
 object GeneratorConfig:
   enum HttpSource:
-    case Sttp4, Sttp3
+    case Sttp4
 
   enum JsonCodec:
     case ZioJson, Jsoniter
@@ -42,10 +41,6 @@ object GeneratorConfig:
       case Array    => s"Array[$t]"
       case ZioChunk => s"zio.Chunk[$t]"
   }
-
-  // potential dialect options
-  enum Dialect:
-    case Scala3
 
 enum SpecsInput:
   case StdIn
@@ -103,12 +98,10 @@ def generateBySpec(
               List(
                 s"${toComment(List(s"${specs.title} ${specs.version}", specs.description, specs.documentationLink))}",
                 "",
-                config.dialect match
-                  case Dialect.Scala3 => s"package ${config.outPkg}",
+                s"package ${config.outPkg}",
                 "",
                 config.httpSource match {
                   case HttpSource.Sttp4 => "import sttp.model.*\nimport sttp.client4.*"
-                  case HttpSource.Sttp3 => "import sttp.model.*\nimport sttp.client3.*"
                 },
                 "",
                 s"""val baseUrl: Uri = uri"${specs.baseUrl}"""",
@@ -150,24 +143,17 @@ def generateBySpec(
             Files.writeString(
               path,
               List(
-                config.dialect match
-                  case Dialect.Scala3 => s"package $resourcesPkg",
+                s"package $resourcesPkg",
                 "",
                 config.httpSource match {
                   case HttpSource.Sttp4 =>
                     "import sttp.model.*\nimport sttp.client4.*, sttp.client4.ResponseException.{DeserializationException, UnexpectedStatusCode}"
-                  case HttpSource.Sttp3 => "import sttp.model.*\nimport sttp.client3.*"
                 },
                 config.jsonCodec match {
                   case JsonCodec.ZioJson  => "import zio.json.*"
                   case JsonCodec.Jsoniter => "import com.github.plokhotnyuk.jsoniter_scala.core.*"
                 },
-                config.dialect match
-                  case Dialect.Scala3 => "",
-                s"val resourceRequest: ${
-                    if config.httpSource == HttpSource.Sttp3 then "RequestT[Empty, Either[String, String], Any]"
-                    else "PartialRequest[Either[String, String]]"
-                  } = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
+                s"val resourceRequest: PartialRequest[Either[String, String]] = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
                 "",
                 s"export ${config.outPkg}.QueryParameters",
                 "",
@@ -184,29 +170,11 @@ def generateBySpec(
                        |      }
                        |    else Left(UnexpectedStatusCode(String(bytes, java.nio.charset.StandardCharsets.UTF_8), metadata))
                        |  )""".stripMargin
-                  case (HttpSource.Sttp3, JsonCodec.Jsoniter) =>
-                    """|def asJson[T : JsonValueCodec]:  ResponseAs[Either[ResponseException[String, Exception], T], Any] =
-                       |  asByteArrayAlways.mapWithMetadata((bytes, metadata) =>
-                       |    if metadata.isSuccess then
-                       |      try {
-                       |        Right(readFromArray[T](bytes))
-                       |      } catch {
-                       |        case e: Exception =>
-                       |          Left(DeserializationException(String(bytes, java.nio.charset.StandardCharsets.UTF_8), e))
-                       |      }
-                       |    else Left(HttpError(String(bytes, java.nio.charset.StandardCharsets.UTF_8), metadata.code))
-                       |  )""".stripMargin
                   case (HttpSource.Sttp4, JsonCodec.ZioJson) =>
                     """|def asJson[T : JsonDecoder]: ResponseAs[Either[ResponseException[String], T]] =
                        |  asStringAlways.mapWithMetadata((body, metadata) =>
                        |     if metadata.isSuccess then body.fromJson[T].left.map(e => DeserializationException(body, Exception(e), metadata))
                        |     else Left(UnexpectedStatusCode(body, metadata))
-                       |  )""".stripMargin
-                  case (HttpSource.Sttp3, JsonCodec.ZioJson) =>
-                    """|def asJson[T : JsonDecoder]: ResponseAs[Either[ResponseException[String, Exception], T], Any] =
-                       |  asStringAlways.mapWithMetadata((body, metadata) =>
-                       |     if metadata.isSuccess then body.fromJson[T].left.map(e => DeserializationException(body, Exception(e)))
-                       |     else Left(HttpError(body, metadata.code))
                        |  )""".stripMargin,
                 "",
                 config.httpSource match
@@ -215,12 +183,6 @@ def generateBySpec(
                        |  asStringAlways.mapWithMetadata((body, metadata) =>
                        |     if metadata.isSuccess then Right(body)
                        |     else Left(UnexpectedStatusCode(body, metadata))
-                       |  )""".stripMargin
-                  case HttpSource.Sttp3 =>
-                    """|def asEmptyResponse: ResponseAs[Either[ResponseException[String, Exception], String], Any] =
-                       |  asStringAlways.mapWithMetadata((body, metadata) =>
-                       |    if metadata.isSuccess then Right(body)
-                       |    else Left(HttpError(body, metadata.code))
                        |  )""".stripMargin
               ).mkString("\n")
             )
@@ -272,7 +234,6 @@ def generateBySpec(
                          schema = schema,
                          pkg = schemasPkg,
                          jsonCodec = config.jsonCodec,
-                         dialect = config.dialect,
                          hasProps = p => specs.hasProps(p),
                          arrType = config.arrayType,
                          commonCodecsPkg =
@@ -320,7 +281,6 @@ def resourceCode(
 ) =
   val sttpClientPkg = httpSource match
     case HttpSource.Sttp4 => "sttp.client4"
-    case HttpSource.Sttp3 => "sttp.client3"
 
   List(
     s"package $pkg",
@@ -414,8 +374,6 @@ def resourceCode(
             httpSource match
               case HttpSource.Sttp4 =>
                 s"Request[Either[ResponseException[String], $t]]"
-              case HttpSource.Sttp3 =>
-                s"RequestT[Identity, Either[ResponseException[String, Exception], $t], Any]"
 
           val (resType, mapResponse) = method.response match
             case Some(r) if r.schemaPath.forall(hasProps) =>
@@ -440,7 +398,6 @@ def schemasCode(
     schema: Schema,
     pkg: String,
     jsonCodec: JsonCodec,
-    dialect: Dialect,
     hasProps: SchemaPath => Boolean,
     arrType: ArrayType,
     commonCodecsPkg: Option[String]
@@ -505,10 +462,8 @@ def schemasCode(
            |import com.github.plokhotnyuk.jsoniter_scala.macros.*""".stripMargin
     },
     commonCodecsPkg match
-      case Some(codecsPkg) =>
-        dialect match
-          case Dialect.Scala3 => s"import $codecsPkg.given"
-      case _ => "",
+      case Some(codecsPkg) => s"import $codecsPkg.given"
+      case _               => "",
     toSchemaClass(schema)
   ).mkString("\n")
 }

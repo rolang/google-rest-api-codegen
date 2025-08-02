@@ -75,7 +75,6 @@ private def argsToTask(args: Seq[String]): Either[String, Task] =
       outPkg = outPkg,
       httpSource = httpSource,
       jsonCodec = jsonCodec,
-      dialect = Dialect.Scala3,
       preprocess = s => {
         incResources.partitionMap(s => if s.startsWith("!") then Left(s.stripPrefix("!")) else Right(s)) match
           case (Nil, Nil)  => s

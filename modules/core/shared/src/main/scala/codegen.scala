@@ -368,14 +368,14 @@ def resourceCode(
             case None => None
 
           val (requiredParams, optParams) = method.scalaParameters.partition(_._2.required)
-          val params =
-            requiredParams.map((n, t) => s"${toComment(t.description)}$n: ${t.scalaType(arrType)}") :::
-              req.toList.map(r => s"request: ${r.scalaType(arrType)}") :::
-              uploadProtocol.toList.map((typ, default) => s"uploadProtocol: $typ = \"$default\"") :::
-              optParams.map((n, t) => s"${toComment(t.description)}$n: ${t.scalaType(arrType)} = None") :::
+          def params(indent: String) =
+            requiredParams.map((n, t) => s"${toComment(t.description)}$indent$n: ${t.scalaType(arrType)}") :::
+              req.toList.map(r => s"${indent}request: ${r.scalaType(arrType)}") :::
+              uploadProtocol.toList.map((typ, default) => s"${indent}uploadProtocol: $typ = \"$default\"") :::
+              optParams.map((n, t) => s"${toComment(t.description)}$indent$n: ${t.scalaType(arrType)} = None") :::
               List(
-                s"endpointUrl: Uri = $rootPkg.baseUrl",
-                "commonQueryParams: QueryParameters = " + ((
+                s"${indent}endpointUrl: Uri = $rootPkg.baseUrl",
+                s"${indent}commonQueryParams: QueryParameters = " + ((
                   method.mediaUploads,
                   commonQueryParams.collectFirst { case ("uploadType", Parameter(_, _, e: SchemaType.Enum, _, _)) => e }
                 ) match {
@@ -431,10 +431,10 @@ def resourceCode(
               )
             case _ => (responseType("String"), ".response(asEmptyResponse)")
 
-          s"""|def ${toScalaName(k)}(\n${params.mkString(",\n")}): $resType = {$queryParams
-              |  $setReqUri
-              |  resourceRequest.${method.httpMethod.toLowerCase()}(requestUri.addParams(params))$body$mapResponse
-              |}""".stripMargin
+          s"""|  def ${toScalaName(k)}(\n${params(indent = "    ").mkString(",\n")}\n  ): $resType = {$queryParams
+              |    $setReqUri
+              |    resourceRequest.${method.httpMethod.toLowerCase()}(requestUri.addParams(params))$body$mapResponse
+              |  }""".stripMargin
         }
         .mkString("\n", "\n\n", "\n") +
       "}"
@@ -489,12 +489,12 @@ def schemasCode(
            val enumType =
              if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
              else SchemaType.EnumType.Nominal(s"$scalaName.$n")
-           s"${toComment(t.withTypeDescription)}$n: ${
+           s"${toComment(t.withTypeDescription)}  $n: ${
                (if (t.optional) s"${t.scalaType(arrType, enumType)} = None" else t.scalaType(arrType, enumType))
              }"
          }
          .mkString("", ",\n", "")}
-        |) {\n${`def toJsonString`(scalaName)}\n}\n
+        |) {\n  ${`def toJsonString`(scalaName)}\n}\n
         |
         |${jsonDecoder(scalaName)}
         |""".stripMargin
@@ -810,7 +810,7 @@ object SchemaType:
               read[List[String]](e)
                 .zip(read[List[String]](o("enumDescriptions")))
                 .map((v, vd) => EnumValue(value = v, enumDescription = vd)),
-              false
+              optional
             )
           case _ =>
             o.value.get("additionalProperties").map(_.obj) match

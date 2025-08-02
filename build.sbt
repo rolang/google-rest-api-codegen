@@ -229,22 +229,7 @@ def codegenTask(
     }
 
     val files = listFilesRec(List(outDir), Nil)
-
-    // formatting (may need to find another way...)
-    val fmtCmd = s"scala-cli fmt --scalafmt-conf=./.scalafmt.conf ${outDir.absolutePath}"
-    logger.info(s"Formatting with '$fmtCmd'")
-    val fmtErrs = scala.collection.mutable.ListBuffer.empty[String]
-    fmtCmd ! ProcessLogger(
-      _ => (),
-      e => fmtErrs += e
-    ) match {
-      case 0 => ()
-      case c => throw new InterruptedException(s"Failure on code formatting: ${errs.mkString("\n")}")
-    }
-
     IO.delete(outDir / ".scala-build")
-    logger.success(s"Formatting sources in $outPathRel done")
-
     files
   }
 }

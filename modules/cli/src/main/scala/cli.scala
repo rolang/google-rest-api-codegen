@@ -1,8 +1,8 @@
 // for test runs using scala-cli
 //> using jvm system
-//> using scala 3.7.1
+//> using scala 3.7.3
 //> using file ../../../../core/shared/src/main/scala/codegen.scala
-//> using dep com.lihaoyi::upickle:4.2.1
+//> using dep com.lihaoyi::upickle:4.3.2
 
 package gcp.codegen.cli
 

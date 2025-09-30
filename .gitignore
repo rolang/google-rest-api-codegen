@@ -10,3 +10,4 @@ metals.sbt
 example/out
 .env
 test-local
+out

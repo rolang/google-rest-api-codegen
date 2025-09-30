@@ -2,7 +2,7 @@ ThisBuild / description := "Google Cloud client code generator"
 ThisBuild / organization := "dev.rolang"
 ThisBuild / licenses := Seq(License.MIT)
 ThisBuild / homepage := Some(url("https://github.com/rolang/google-rest-api-codegen"))
-ThisBuild / scalaVersion := "3.7.1"
+ThisBuild / scalaVersion := "3.7.3"
 ThisBuild / version ~= { v => if (v.contains('+')) s"${v.replace('+', '-')}-SNAPSHOT" else v }
 ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / scmInfo := Some(
@@ -19,7 +19,6 @@ ThisBuild / developers := List(
     url = url("https://rolang.dev")
   )
 )
-ThisBuild / sonatypeCredentialHost := xerial.sbt.Sonatype.sonatypeCentralHost
 
 lazy val testSettings = Seq(
   Compile / scalacOptions ++= Seq("-Xmax-inlines:64"),
@@ -27,7 +26,11 @@ lazy val testSettings = Seq(
 )
 
 lazy val publishSettings = List(
-  publishTo := sonatypePublishToBundle.value
+  publishTo := {
+    val centralSnapshots = "https://central.sonatype.com/repository/maven-snapshots/"
+    if (isSnapshot.value) Some("central-snapshots" at centralSnapshots)
+    else localStaging.value
+  }
 )
 
 lazy val noPublish = Seq(
@@ -37,15 +40,15 @@ lazy val noPublish = Seq(
   publish / skip := true
 )
 
-lazy val sttpClient4Version = "4.0.9"
+lazy val sttpClient4Version = "4.0.11"
 
-lazy val zioVersion = "2.1.16"
+lazy val zioVersion = "2.1.21"
 
-lazy val zioJsonVersion = "0.7.39"
+lazy val zioJsonVersion = "0.7.44"
 
-lazy val jsoniterVersion = "2.33.2"
+lazy val jsoniterVersion = "2.38.2"
 
-lazy val munitVersion = "1.0.2"
+lazy val munitVersion = "1.2.0"
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 

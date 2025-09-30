@@ -24,14 +24,14 @@ The generator can be used with any tool that can perform system calls to a comma
 See example under [example/generate.scala](./example/generate.scala).
 
 ```scala
-//> using scala 3.7.1
-//> using dep dev.rolang::gcp-codegen::0.0.7
+//> using scala 3.7.3
+//> using dep dev.rolang::gcp-codegen::0.0.8
 
 import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 
 @main def run =
   val files = Task(
-    specsInput = SpecsInput.FilePath(Path.of("pubsub_v1.json")),
+    specsInput = SpecsInput.StdIn,
     config = GeneratorConfig(
       outDir = Path.of("out"),
       outPkg = "example.pubsub.v1",
@@ -45,7 +45,7 @@ import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 ```
 Run example:
 ```shell
-cd example && scala generate.scala && scala fmt ./out
+cat example/pubsub_v1.json | scala example/generate.scala
 ```
 See output in `example/out`.
 

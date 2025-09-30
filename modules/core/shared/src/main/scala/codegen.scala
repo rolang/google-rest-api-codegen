@@ -165,7 +165,7 @@ def generateBySpec(
                        |      try {
                        |        Right(readFromArray[T](bytes))
                        |      } catch {
-                       |        case e: Exception =>
+                       |        case e: JsonReaderException =>
                        |          Left(DeserializationException(String(bytes, java.nio.charset.StandardCharsets.UTF_8), e, metadata))
                        |      }
                        |    else Left(UnexpectedStatusCode(String(bytes, java.nio.charset.StandardCharsets.UTF_8), metadata))
@@ -325,10 +325,12 @@ def resourceCode(
 
           val (requiredParams, optParams) = method.scalaParameters.partition(_._2.required)
           def params(indent: String) =
-            requiredParams.map((n, t) => s"${toComment(t.description)}$indent$n: ${t.scalaType(arrType)}") :::
+            requiredParams.map((n, t) => s"${toComment(t.description, indent)}$indent$n: ${t.scalaType(arrType)}") :::
               req.toList.map(r => s"${indent}request: ${r.scalaType(arrType)}") :::
               uploadProtocol.toList.map((typ, default) => s"${indent}uploadProtocol: $typ = \"$default\"") :::
-              optParams.map((n, t) => s"${toComment(t.description)}$indent$n: ${t.scalaType(arrType)} = None") :::
+              optParams.map((n, t) =>
+                s"${toComment(t.description, indent)}$indent$n: ${t.scalaType(arrType)} = None"
+              ) :::
               List(
                 s"${indent}endpointUrl: Uri = $rootPkg.baseUrl",
                 s"${indent}commonQueryParams: QueryParameters = " + ((
@@ -385,7 +387,8 @@ def resourceCode(
               )
             case _ => (responseType("String"), ".response(asEmptyResponse)")
 
-          s"""|  def ${toScalaName(k)}(\n${params(indent = "    ").mkString(",\n")}\n  ): $resType = {$queryParams
+          s"""|${toComment(method.description)}  def ${toScalaName(k)}(\n${params(indent = "    ")
+               .mkString(",\n")}\n  ): $resType = {$queryParams
               |    $setReqUri
               |    resourceRequest.${method.httpMethod.toLowerCase()}(requestUri.addParams(params))$body$mapResponse
               |  }""".stripMargin
@@ -529,6 +532,7 @@ case class MediaUpload(protocols: Map[String, MediaUploadProtocol], accept: List
 
 case class Method(
     httpMethod: String,
+    description: Option[String],
     path: String,
     flatPath: Option[FlatPath],
     parameters: Map[String, Parameter],
@@ -589,6 +593,7 @@ object Method:
   given Reader[Method] = reader[ujson.Obj].map { o =>
     Method(
       httpMethod = o("httpMethod").str,
+      description = o.value.get("description").map(_.str),
       path = o("path").str,
       flatPath = o.value
         .get("flatPath")

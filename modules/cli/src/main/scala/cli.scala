@@ -77,9 +77,9 @@ private def argsToTask(args: Seq[String]): Either[String, Task] =
       jsonCodec = jsonCodec,
       preprocess = s => {
         incResources.partitionMap(s => if s.startsWith("!") then Left(s.stripPrefix("!")) else Right(s)) match
-          case (Nil, Nil)  => s
-          case (excl, Nil) => s.copy(resources = s.resources.view.filterKeys(!_.hasMatch(excl)).toMap)
-          case (Nil, incl) => s.copy(resources = s.resources.view.filterKeys(_.hasMatch(incl)).toMap)
+          case (Nil, Nil)   => s
+          case (excl, Nil)  => s.copy(resources = s.resources.view.filterKeys(!_.hasMatch(excl)).toMap)
+          case (Nil, incl)  => s.copy(resources = s.resources.view.filterKeys(_.hasMatch(incl)).toMap)
           case (excl, incl) =>
             s.copy(resources = s.resources.view.filterKeys(k => !k.hasMatch(excl) && k.hasMatch(incl)).toMap)
       },

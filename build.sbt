@@ -46,6 +46,7 @@ val zioVersion = "2.1.22"
 
 val zioJsonVersion = "0.7.45"
 
+// NOTE: update from 2.38.3 to 2.38.4 causes compilation error with some recursive types on codec derivation
 val jsoniterVersion = "2.38.2"
 
 val munitVersion = "1.2.1"
@@ -66,7 +67,13 @@ lazy val root = (project in file("."))
 // for supporting code inspection / testing of generated code via test_gen.sh script
 lazy val testLocal = (project in file("test-local"))
   .settings(
-    libraryDependencies ++= dependencyByConfig("Sttp4", "Jsoniter", "ZioChunk")
+    libraryDependencies ++= Seq(
+      "com.softwaremill.sttp.client4" %% "core" % sttpClient4Version,
+      "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core" % jsoniterVersion,
+      "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % jsoniterVersion % "compile-internal",
+      "dev.zio" %% "zio-json" % zioJsonVersion,
+      "dev.zio" %% "zio" % zioVersion
+    )
   )
   .settings(noPublish)
 

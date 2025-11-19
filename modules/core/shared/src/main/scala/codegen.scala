@@ -129,9 +129,18 @@ def generateBySpec(
                 if specs.endpoints.nonEmpty then "enum Endpoint(val location: String, val url: Uri):" else "",
                 specs.endpoints
                   .map(e =>
+                    // for cases where location is not unique we will append numbers
+                    val locationPostfix = specs.endpoints
+                      .collect { case Endpoint(location = e.location, endpointUrl = endpointUrl) =>
+                        endpointUrl
+                      }
+                      .zipWithIndex
+                      .collectFirst { case (e.endpointUrl, idx) if idx > 0 => (idx + 1).toString() }
+                      .getOrElse("")
+
                     s"""${toComment(
                         Some(e.description)
-                      )}  case `${e.location}` extends Endpoint("${e.location}", uri"${e.endpointUrl}")""".stripMargin
+                      )}  case `${e.location}$locationPostfix` extends Endpoint("${e.location}", uri"${e.endpointUrl}")""".stripMargin
                   )
                   .mkString("\n")
               ).mkString("\n")
@@ -220,7 +229,7 @@ def generateBySpec(
                 hasProps = p => specs.hasProps(p),
                 arrType = config.arrayType
               ) match
-                case None => Nil
+                case None         => Nil
                 case Some(codecs) =>
                   Files.writeString(commonCodecsPath, codecs)
                   List(commonCodecsPath.toFile())
@@ -301,10 +310,9 @@ def resourceCode(
                 "\\{(.*?)\\}".r.findAllIn(s).toList match
                   case Nil                => s"PathSegment(\"$s\")"
                   case v :: Nil if v == s => "PathSegment(" + toScalaName(v.stripPrefix("{").stripSuffix("}")) + ")"
-                  case vars =>
-                    "PathSegment(s\"" + vars.foldLeft(s)((res, v) =>
-                      res.replace(v, "$" + v.stripPrefix("{").stripSuffix("}"))
-                    ) + "\")"
+                  case vars               =>
+                    "PathSegment(s\"" + vars
+                      .foldLeft(s)((res, v) => res.replace(v, "$" + v.stripPrefix("{").stripSuffix("}"))) + "\")"
               )
 
           val req = method.mediaUploads match
@@ -362,15 +370,14 @@ def resourceCode(
 
           val queryParams = "\n    val params = " +
             (method.scalaQueryParams match
-              case Nil => "commonQueryParams.value"
+              case Nil     => "commonQueryParams.value"
               case qParams =>
                 qParams
                   .map {
                     case (k, p) if p.required => s"""Map("$k" -> $k)"""
                     case (k, p)               => s"""$k.map(p => Map("$k" -> p.toString)).getOrElse(Map.empty)"""
                   }
-                  .mkString("", " ++ ", " ++ commonQueryParams.value\n")
-            )
+                  .mkString("", " ++ ", " ++ commonQueryParams.value\n"))
 
           def responseType(t: String) =
             httpSource match
@@ -459,7 +466,7 @@ def schemasCode(
     s"package $pkg",
     "",
     jsonCodec match {
-      case JsonCodec.ZioJson => "import zio.json.*"
+      case JsonCodec.ZioJson  => "import zio.json.*"
       case JsonCodec.Jsoniter =>
         """|import com.github.plokhotnyuk.jsoniter_scala.core.*
            |import com.github.plokhotnyuk.jsoniter_scala.macros.*""".stripMargin
@@ -492,7 +499,7 @@ def commonSchemaCodecs(
             }
         )
         .distinct match
-        case Nil => None
+        case Nil   => None
         case props =>
           Some(
             List(
@@ -631,7 +638,7 @@ def readResources(
   resources match
     case (k, v) :: xs =>
       v.obj.remove("resources").map(_.obj) match
-        case None => readResources(xs, result.updated(k, read[Resource](v)))
+        case None      => readResources(xs, result.updated(k, read[Resource](v)))
         case Some(obj) =>
           val newRes = obj.map((a, b) => ResourcePath(k, a) -> b).toList ::: xs
           Try(read[Resource](v)) match
@@ -727,8 +734,8 @@ enum SchemaType(val optional: Boolean):
     case Primitive("number", _, Some("double" | "float"))  => toType("Double")
     case Primitive("boolean", _, _)                        => toType("Boolean")
     case Ref(ref, _)                                       => toType(ref.scalaName)
-    case Array(t, _)  => toType(arrayType.toScalaType(t.scalaType(arrayType, enumType)))
-    case Object(t, _) => toType(s"Map[String, ${t.scalaType(arrayType)}]")
+    case Array(t, _)        => toType(arrayType.toScalaType(t.scalaType(arrayType, enumType)))
+    case Object(t, _)       => toType(s"Map[String, ${t.scalaType(arrayType)}]")
     case Enum(_, values, _) =>
       enumType match
         case SchemaType.EnumType.Literal       => toType(values.map(v => v.value).mkString("\"", "\" | \"", "\""))
@@ -777,7 +784,7 @@ object SchemaType:
               case _ =>
                 o.value.get("$ref").map(_.str) match
                   case Some(ref) => SchemaType.Ref(SchemaPath(ref), optional)
-                  case _ =>
+                  case _         =>
                     if !o.value.keySet.contains("properties") then
                       if Set("uploadType", "upload_protocol").exists(context.jsonPath.lastOption.contains) then
                         """"([\w]+)"""".r
@@ -852,7 +859,7 @@ object Schema:
         result: Map[SchemaPath, Schema]
     ): Map[SchemaPath, Schema] =
       schemas match {
-        case Nil => result
+        case Nil                => result
         case (name, data) :: xs =>
           val schema = readSchema(name, data)
 
@@ -862,7 +869,7 @@ object Schema:
               case None    => Nil
               case Some(p) => List((p, p.jsonPath.foldLeft(o)(_.apply(_).obj)))
             } match {
-            case Nil => readSchemas(xs, result.updated(name, schema))
+            case Nil    => readSchemas(xs, result.updated(name, schema))
             case nested =>
               readSchemas(nested ::: xs, result.updated(name, schema))
           }

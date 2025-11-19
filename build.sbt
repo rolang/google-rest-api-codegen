@@ -2,7 +2,7 @@ ThisBuild / description := "Google Cloud client code generator"
 ThisBuild / organization := "dev.rolang"
 ThisBuild / licenses := Seq(License.MIT)
 ThisBuild / homepage := Some(url("https://github.com/rolang/google-rest-api-codegen"))
-ThisBuild / scalaVersion := "3.7.3"
+ThisBuild / scalaVersion := "3.7.4"
 ThisBuild / version ~= { v => if (v.contains('+')) s"${v.replace('+', '-')}-SNAPSHOT" else v }
 ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / scmInfo := Some(

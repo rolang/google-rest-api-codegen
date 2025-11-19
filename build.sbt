@@ -2,7 +2,7 @@ ThisBuild / description := "Google Cloud client code generator"
 ThisBuild / organization := "dev.rolang"
 ThisBuild / licenses := Seq(License.MIT)
 ThisBuild / homepage := Some(url("https://github.com/rolang/google-rest-api-codegen"))
-ThisBuild / scalaVersion := "3.7.3"
+ThisBuild / scalaVersion := "3.7.4"
 ThisBuild / version ~= { v => if (v.contains('+')) s"${v.replace('+', '-')}-SNAPSHOT" else v }
 ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / scmInfo := Some(
@@ -40,15 +40,17 @@ lazy val noPublish = Seq(
   publish / skip := true
 )
 
-lazy val sttpClient4Version = "4.0.11"
+val sttpClient4Version = "4.0.13"
 
-lazy val zioVersion = "2.1.21"
+val zioVersion = "2.1.22"
 
-lazy val zioJsonVersion = "0.7.44"
+val zioJsonVersion = "0.7.45"
 
-lazy val jsoniterVersion = "2.38.2"
+val jsoniterVersion = "2.38.4"
 
-lazy val munitVersion = "1.2.0"
+val munitVersion = "1.2.1"
+
+val upickleVersion = "4.4.1"
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 
@@ -64,7 +66,13 @@ lazy val root = (project in file("."))
 // for supporting code inspection / testing of generated code via test_gen.sh script
 lazy val testLocal = (project in file("test-local"))
   .settings(
-    libraryDependencies ++= dependencyByConfig("Sttp4", "Jsoniter", "ZioChunk")
+    libraryDependencies ++= Seq(
+      "com.softwaremill.sttp.client4" %% "core" % sttpClient4Version,
+      "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core" % jsoniterVersion,
+      "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % jsoniterVersion % "compile-internal",
+      "dev.zio" %% "zio-json" % zioJsonVersion,
+      "dev.zio" %% "zio" % zioVersion
+    )
   )
   .settings(noPublish)
 
@@ -77,7 +85,7 @@ lazy val core = crossProject(JVMPlatform, NativePlatform)
   )
   .settings(
     libraryDependencies ++= Seq(
-      "com.lihaoyi" %%% "upickle" % "4.1.0"
+      "com.lihaoyi" %%% "upickle" % upickleVersion
     )
   )
 

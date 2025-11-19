@@ -40,15 +40,17 @@ lazy val noPublish = Seq(
   publish / skip := true
 )
 
-lazy val sttpClient4Version = "4.0.11"
+val sttpClient4Version = "4.0.13"
 
-lazy val zioVersion = "2.1.21"
+val zioVersion = "2.1.22"
 
-lazy val zioJsonVersion = "0.7.44"
+val zioJsonVersion = "0.7.45"
 
-lazy val jsoniterVersion = "2.38.2"
+val jsoniterVersion = "2.38.4"
 
-lazy val munitVersion = "1.2.0"
+val munitVersion = "1.2.1"
+
+val upickleVersion = "4.4.1"
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 
@@ -77,7 +79,7 @@ lazy val core = crossProject(JVMPlatform, NativePlatform)
   )
   .settings(
     libraryDependencies ++= Seq(
-      "com.lihaoyi" %%% "upickle" % "4.1.0"
+      "com.lihaoyi" %%% "upickle" % upickleVersion
     )
   )
 

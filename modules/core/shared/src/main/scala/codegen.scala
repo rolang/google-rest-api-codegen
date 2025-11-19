@@ -447,12 +447,12 @@ def schemasCode(
     val scalaName = s.id.scalaName
     s"""|case class $scalaName(
         |${s
-         .scalaProperties(hasProps)
+         .sortedProperties(hasProps)
          .map { (n, t) =>
            val enumType =
              if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
              else SchemaType.EnumType.Nominal(s"$scalaName.${toScalaTypeName(n)}")
-           s"${toComment(t.withTypeDescription)}  $n: ${
+           s"${toComment(t.withTypeDescription)}  ${toScalaName(n)}: ${
                (if (t.optional) s"${t.scalaType(arrType, enumType)} = None" else t.scalaType(arrType, enumType))
              }"
          }
@@ -490,7 +490,7 @@ def commonSchemaCodecs(
     case (JsonCodec.Jsoniter, ArrayType.ZioChunk) =>
       schemas.toList
         .flatMap((sk, sv) =>
-          sv.scalaProperties(hasProps)
+          sv.sortedProperties(hasProps)
             .collect { case (k, Property(_, SchemaType.Array(typ, _), _)) =>
               val enumType =
                 if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
@@ -824,14 +824,12 @@ case class Schema(
 
   // required properties first
   // references wihout properties are excluded
-  private def sortedProps(hasProps: SchemaPath => Boolean): List[(String, Property)] =
+  def sortedProperties(hasProps: SchemaPath => Boolean): List[(String, Property)] =
     properties
       .filter { (_, prop) =>
         prop.schemaPath.forall(hasProps(_))
       }
       .sortBy(_._2.typ.optional)
-  def scalaProperties(hasProps: SchemaPath => Boolean): List[(String, Property)] =
-    sortedProps(hasProps).map { (k, prop) => (toScalaName(k), prop) }
 }
 
 object Schema:

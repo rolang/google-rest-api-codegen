@@ -46,7 +46,7 @@ val zioVersion = "2.1.22"
 
 val zioJsonVersion = "0.7.45"
 
-val jsoniterVersion = "2.38.4"
+val jsoniterVersion = "2.38.2"
 
 val munitVersion = "1.2.1"
 

@@ -445,7 +445,7 @@ def schemasCode(
            val enumType =
              if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
              else SchemaType.EnumType.Nominal(s"$scalaName.${toScalaTypeName(n)}")
-           s"${toComment(t.withTypeDescription)}  $n: ${
+           s"${toComment(t.withTypeDescription)}  ${toScalaName(n)}: ${
                (if (t.optional) s"${t.scalaType(arrType, enumType)} = None" else t.scalaType(arrType, enumType))
              }"
          }

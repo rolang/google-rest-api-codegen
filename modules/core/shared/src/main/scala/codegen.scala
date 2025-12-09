@@ -291,13 +291,13 @@ def resourceCode(
   val sttpClientPkg = httpSource match
     case HttpSource.Sttp4 => "sttp.client4"
 
+  val sttpUriPkg = "sttp.model.Uri"
+
   List(
     s"package $pkg",
     "",
     s"import $schemasPkg.*",
     s"import $resourcesPkg.*",
-    "",
-    s"import sttp.model.Uri, sttp.model.Uri.PathSegment, $sttpClientPkg.*",
     "",
     s"object ${resourceName} {" +
       resource.methods
@@ -308,10 +308,11 @@ def resourceCode(
               .filter(_.nonEmpty)
               .map(s =>
                 "\\{(.*?)\\}".r.findAllIn(s).toList match
-                  case Nil                => s"PathSegment(\"$s\")"
-                  case v :: Nil if v == s => "PathSegment(" + toScalaName(v.stripPrefix("{").stripSuffix("}")) + ")"
-                  case vars               =>
-                    "PathSegment(s\"" + vars
+                  case Nil                => s"$sttpUriPkg.PathSegment(\"$s\")"
+                  case v :: Nil if v == s =>
+                    s"$sttpUriPkg.PathSegment(" + toScalaName(v.stripPrefix("{").stripSuffix("}")) + ")"
+                  case vars =>
+                    s"$sttpUriPkg.PathSegment(s\"" + vars
                       .foldLeft(s)((res, v) => res.replace(v, "$" + v.stripPrefix("{").stripSuffix("}"))) + "\")"
               )
 
@@ -340,13 +341,14 @@ def resourceCode(
                 s"${toComment(t.description, indent)}$indent$n: ${t.scalaType(arrType)} = None"
               ) :::
               List(
-                s"${indent}endpointUrl: Uri = $rootPkg.baseUrl",
+                s"${indent}endpointUrl: $sttpUriPkg = $rootPkg.baseUrl",
                 s"${indent}commonQueryParams: QueryParameters = " + ((
                   method.mediaUploads,
                   commonQueryParams.collectFirst { case ("uploadType", Parameter(_, _, e: SchemaType.Enum, _, _)) => e }
                 ) match {
-                  case (Some(m), Some(ut)) => s"""QueryParameters(uploadType = Some("${ut.values.head.value}"))"""
-                  case _                   => "QueryParameters.empty"
+                  case (Some(m), Some(ut)) =>
+                    s"""QueryParameters(uploadType = Some("${ut.values.head.value}"))"""
+                  case _ => "QueryParameters.empty"
                 })
               )
 
@@ -382,7 +384,7 @@ def resourceCode(
           def responseType(t: String) =
             httpSource match
               case HttpSource.Sttp4 =>
-                s"Request[Either[ResponseException[String], $t]]"
+                s"$sttpClientPkg.Request[Either[$sttpClientPkg.ResponseException[String], $t]]"
 
           val (resType, mapResponse) = method.response match
             case Some(r) if r.schemaPath.forall(hasProps) =>

@@ -129,7 +129,8 @@ lazy val testProjects: CompositeProject = new CompositeProject {
         "storage" -> "v1",
         "aiplatform" -> "v1",
         "iamcredentials" -> "v1",
-        "redis" -> "v1"
+        "redis" -> "v1",
+        "sheets" -> "v4"
       )
       httpSource <- Seq("Sttp4")
       jsonCodec <- Seq("ZioJson", "Jsoniter")

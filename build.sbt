@@ -42,16 +42,15 @@ lazy val noPublish = Seq(
 
 val sttpClient4Version = "4.0.13"
 
-val zioVersion = "2.1.22"
+val zioVersion = "2.1.23"
 
-val zioJsonVersion = "0.7.45"
+val zioJsonVersion = "0.8.0"
 
-// NOTE: update from 2.38.3 to 2.38.4 causes compilation error with some recursive types on codec derivation
-val jsoniterVersion = "2.38.2"
+val jsoniterVersion = "2.38.6"
 
 val munitVersion = "1.2.1"
 
-val upickleVersion = "4.4.1"
+val upickleVersion = "4.4.2"
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 

@@ -116,9 +116,9 @@ def generateBySpec(
                 "  def apply(",
                 specs.queryParameters
                   .map((k, v) =>
-                    s"""${{ toComment(v.description) }}  ${toScalaName(k)}: ${v.typ
+                    s"""${{ toComment(v.description) }}    ${toScalaName(k)}: ${v.typ
                         .withOptional(true)
-                        .scalaType(config.arrayType)} = None"""
+                        .scalaType(config.arrayType, config.jsonCodec)} = None"""
                   )
                   .mkString("  ", ",\n  ", ""),
                 "): QueryParameters =",
@@ -211,7 +211,8 @@ def generateBySpec(
                   httpSource = config.httpSource,
                   hasProps = p => specs.hasProps(p),
                   arrType = config.arrayType,
-                  commonQueryParams = specs.queryParameters
+                  commonQueryParams = specs.queryParameters,
+                  jsonCodec = config.jsonCodec
                 )
                 val path = resourceKey.dirPath(resourcesPath) / s"$resourceName.scala"
                 Files.writeString(path, code)
@@ -220,7 +221,7 @@ def generateBySpec(
             },
           // generate schemas with properties
           for {
-            commonCodecs <- Future {
+            (commonCodecs, hasExtraCodecs) <- Future {
               commonSchemaCodecs(
                 schemas = specs.schemas.filter(_._2.properties.nonEmpty),
                 pkg = schemasPkg,
@@ -229,10 +230,10 @@ def generateBySpec(
                 hasProps = p => specs.hasProps(p),
                 arrType = config.arrayType
               ) match
-                case None         => Nil
-                case Some(codecs) =>
-                  Files.writeString(commonCodecsPath, codecs)
-                  List(commonCodecsPath.toFile())
+                case None                            => (Nil, false)
+                case Some((content, hasExtraCodecs)) =>
+                  Files.writeString(commonCodecsPath, content)
+                  (List(commonCodecsPath.toFile()), hasExtraCodecs)
             }
             schemas <- Future
               .traverse(specs.schemas) { (schemaPath, schema) =>
@@ -246,7 +247,7 @@ def generateBySpec(
                          hasProps = p => specs.hasProps(p),
                          arrType = config.arrayType,
                          commonCodecsPkg =
-                           if commonCodecs.nonEmpty && schema.hasArrays then Some(commonCodecsPkg) else None
+                           if commonCodecs.nonEmpty && hasExtraCodecs then Some(commonCodecsPkg) else None
                        )
                      else
                        // create a type alias for objects without properties
@@ -286,7 +287,8 @@ def resourceCode(
     httpSource: HttpSource,
     arrType: ArrayType,
     hasProps: SchemaPath => Boolean,
-    commonQueryParams: Map[String, Parameter]
+    commonQueryParams: Map[String, Parameter],
+    jsonCodec: JsonCodec
 ) =
   val sttpClientPkg = httpSource match
     case HttpSource.Sttp4 => "sttp.client4"
@@ -334,11 +336,13 @@ def resourceCode(
 
           val (requiredParams, optParams) = method.scalaParameters.partition(_._2.required)
           def params(indent: String) =
-            requiredParams.map((n, t) => s"${toComment(t.description, indent)}$indent$n: ${t.scalaType(arrType)}") :::
-              req.toList.map(r => s"${indent}request: ${r.scalaType(arrType)}") :::
+            requiredParams.map((n, t) =>
+              s"${toComment(t.description, indent)}$indent$n: ${t.scalaType(arrType, jsonCodec)}"
+            ) :::
+              req.toList.map(r => s"${indent}request: ${r.scalaType(arrType, jsonCodec)}") :::
               uploadProtocol.toList.map((typ, default) => s"${indent}uploadProtocol: $typ = \"$default\"") :::
               optParams.map((n, t) =>
-                s"${toComment(t.description, indent)}$indent$n: ${t.scalaType(arrType)} = None"
+                s"${toComment(t.description, indent)}$indent$n: ${t.scalaType(arrType, jsonCodec)} = None"
               ) :::
               List(
                 s"${indent}endpointUrl: $sttpUriPkg = $rootPkg.baseUrl",
@@ -388,7 +392,7 @@ def resourceCode(
 
           val (resType, mapResponse) = method.response match
             case Some(r) if r.schemaPath.forall(hasProps) =>
-              val bodyType = r.scalaType(arrType)
+              val bodyType = r.scalaType(arrType, jsonCodec)
 
               (
                 responseType(bodyType),
@@ -455,7 +459,8 @@ def schemasCode(
              if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
              else SchemaType.EnumType.Nominal(s"$scalaName.${toScalaTypeName(n)}")
            s"${toComment(t.withTypeDescription)}  ${toScalaName(n)}: ${
-               (if (t.optional) s"${t.scalaType(arrType, enumType)} = None" else t.scalaType(arrType, enumType))
+               (if (t.optional) s"${t.scalaType(arrType, jsonCodec, enumType)} = None"
+                else t.scalaType(arrType, jsonCodec, enumType))
              }"
          }
          .mkString("", ",\n", "")}
@@ -487,8 +492,38 @@ def commonSchemaCodecs(
     jsonCodec: JsonCodec,
     hasProps: SchemaPath => Boolean,
     arrType: ArrayType
-): Option[String] = {
-  (jsonCodec, arrType) match
+): Option[(String, Boolean)] = {
+  (jsonCodec match
+    case JsonCodec.ZioJson  => Nil
+    case JsonCodec.Jsoniter =>
+      List(
+        s"""|package $pkg
+            |
+            |import com.github.plokhotnyuk.jsoniter_scala.core.*
+            |import com.github.plokhotnyuk.jsoniter_scala.macros.*
+            |
+            |opaque type Json = Array[Byte]
+            |
+            |object Json {
+            |
+            |  given codec: JsonValueCodec[Json] = new JsonValueCodec[Json] {
+            |    override def decodeValue(in: JsonReader, default: Json): Json = in.readRawValAsBytes()
+            |
+            |    override def encodeValue(x: Json, out: JsonWriter): Unit = out.writeRawVal(x)
+            |
+            |    override val nullValue: Json = new Array[Byte](0)
+            |  }
+            |
+            |  extension (v: Json) 
+            |    def readAsUnsafe[T: JsonValueCodec]: T = readFromArray(v)
+            |    def readAs[T: JsonValueCodec]: Either[Throwable, T] =
+            |      try
+            |        Right(readFromArray(v))
+            |      catch
+            |        case t: Throwable => Left(t)
+            |}""".stripMargin -> false
+      )
+  ).appendedAll((jsonCodec, arrType) match
     case (JsonCodec.Jsoniter, ArrayType.ZioChunk) =>
       schemas.toList
         .flatMap((sk, sv) =>
@@ -497,41 +532,54 @@ def commonSchemaCodecs(
               val enumType =
                 if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
                 else SchemaType.EnumType.Nominal(s"${sk.lastOption.getOrElse("")}.${toScalaTypeName(k)}")
-              typ.scalaType(arrType, enumType)
+              typ.scalaType(arrType, jsonCodec, enumType)
             }
         )
         .distinct match
-        case Nil   => None
+        case Nil   => Nil
         case props =>
-          Some(
+          List(
             List(
-              s"""|package $pkg
-                  |
-                  |import com.github.plokhotnyuk.jsoniter_scala.core.*
-                  |import com.github.plokhotnyuk.jsoniter_scala.macros.*
-                  |import zio.Chunk""".stripMargin,
               "",
               s"object $objName {",
+              "",
+              // to ensure codec for Chunk[Json] is added since it may not be present in props
+              """|  given JsonChunkCodec: JsonValueCodec[zio.Chunk[Json]] = new JsonValueCodec[zio.Chunk[Json]] {
+                 |    val arrCodec: JsonValueCodec[Array[Json]] = JsonCodecMaker.make
+                 |  
+                 |    override val nullValue: zio.Chunk[Json] = zio.Chunk.empty
+                 |  
+                 |    override def decodeValue(in: JsonReader, default: zio.Chunk[Json]): zio.Chunk[Json] =
+                 |      zio.Chunk.fromArray(arrCodec.decodeValue(in, default.toArray))
+                 |  
+                 |    override def encodeValue(x: zio.Chunk[Json], out: JsonWriter): Unit =
+                 |      arrCodec.encodeValue(x.toArray, out)
+                 |  }""".stripMargin,
+              "",
               props
+                .filterNot(_ == "Json") // to void duplicate codec for Chunk[Json]
                 .map { t =>
                   val prefix = "  given " + toScalaName(t + "ChunkCodec")
-                  s"""|${prefix}: JsonValueCodec[Chunk[$t]] = new JsonValueCodec[Chunk[$t]] {
-                      |    val arrCodec: JsonValueCodec[Array[$t]] = JsonCodecMaker.make
-                      |
-                      |    override val nullValue: Chunk[$t] = Chunk.empty
-                      |
-                      |    override def decodeValue(in: JsonReader, default: Chunk[$t]): Chunk[$t] =
-                      |      Chunk.fromArray(arrCodec.decodeValue(in, default.toArray))
-                      |
-                      |    override def encodeValue(x: Chunk[$t], out: JsonWriter): Unit =
-                      |      arrCodec.encodeValue(x.toArray, out)
-                      |}""".stripMargin
+                  s"""|${prefix}: JsonValueCodec[zio.Chunk[$t]] = new JsonValueCodec[zio.Chunk[$t]] {
+                          |    val arrCodec: JsonValueCodec[Array[$t]] = JsonCodecMaker.make
+                          |
+                          |    override val nullValue: zio.Chunk[$t] = zio.Chunk.empty
+                          |
+                          |    override def decodeValue(in: JsonReader, default: zio.Chunk[$t]): zio.Chunk[$t] =
+                          |      zio.Chunk.fromArray(arrCodec.decodeValue(in, default.toArray))
+                          |
+                          |    override def encodeValue(x: zio.Chunk[$t], out: JsonWriter): Unit =
+                          |      arrCodec.encodeValue(x.toArray, out)
+                          |}""".stripMargin
                 }
                 .mkString("\n\n"),
               "}"
-            ).mkString("\n")
+            ).mkString("\n") -> true
           )
-    case _ => None
+    case _ => Nil) match
+    case Nil    => None
+    case codecs => Some((codecs.map(_._1).mkString("\n"), codecs.exists(_._2)))
+
 }
 
 case class FlatPath(path: String, params: List[String])
@@ -655,7 +703,8 @@ case class Parameter(
     required: Boolean = false,
     pattern: Option[String] = None
 ) {
-  def scalaType(arrType: ArrayType): String = typ.withOptional(!required).scalaType(arrType)
+  def scalaType(arrType: ArrayType, jsonCodec: JsonCodec): String =
+    typ.withOptional(!required).scalaType(arrType, jsonCodec)
 }
 
 object Parameter:
@@ -672,8 +721,8 @@ object Parameter:
 
 case class Property(description: Option[String], typ: SchemaType, readOnly: Boolean = false) {
   def optional: Boolean = typ.optional || readOnly
-  def scalaType(arrType: ArrayType, enumType: SchemaType.EnumType): String =
-    typ.withOptional(optional).scalaType(arrType, enumType)
+  def scalaType(arrType: ArrayType, jsonCodec: JsonCodec, enumType: SchemaType.EnumType): String =
+    typ.withOptional(optional).scalaType(arrType, jsonCodec, enumType)
   def schemaPath: Option[SchemaPath] = typ.schemaPath
   def nestedSchemaPath: Option[SchemaPath] = typ.schemaPath.filter(_.hasNested)
 
@@ -696,10 +745,11 @@ object Property:
 enum SchemaType(val optional: Boolean):
   case Ref(ref: SchemaPath, override val optional: Boolean) extends SchemaType(optional)
   case Primitive(
-      `type`: String,
+      `type`: "string" | "integer" | "number" | "boolean",
       override val optional: Boolean,
       format: Option[String] = None
   ) extends SchemaType(optional)
+  case Any(override val optional: Boolean) extends SchemaType(optional)
   case Array(items: SchemaType, override val optional: Boolean) extends SchemaType(optional)
   case Object(additionalProperties: SchemaType, override val optional: Boolean) extends SchemaType(optional)
   case Enum(typ: String, values: List[SchemaType.EnumValue], override val optional: Boolean) extends SchemaType(true)
@@ -724,9 +774,11 @@ enum SchemaType(val optional: Boolean):
     case t: Array     => t.copy(optional = o)
     case t: Object    => t.copy(optional = o)
     case t: Enum      => t.copy(optional = o)
+    case t: Any       => t.copy(optional = o)
 
   def scalaType(
       arrayType: ArrayType,
+      jsonCodec: JsonCodec,
       enumType: SchemaType.EnumType = SchemaType.EnumType.Literal
   ): String = this match
     case Primitive("string", _, Some("google-datetime"))   => toType("java.time.OffsetDateTime")
@@ -736,13 +788,24 @@ enum SchemaType(val optional: Boolean):
     case Primitive("number", _, Some("double" | "float"))  => toType("Double")
     case Primitive("boolean", _, _)                        => toType("Boolean")
     case Ref(ref, _)                                       => toType(ref.scalaName)
-    case Array(t, _)        => toType(arrayType.toScalaType(t.scalaType(arrayType, enumType)))
-    case Object(t, _)       => toType(s"Map[String, ${t.scalaType(arrayType)}]")
+    case Array(t, _)             => toType(arrayType.toScalaType(t.scalaType(arrayType, jsonCodec, enumType)))
+    case Object(t: Primitive, _) => toType(s"Map[String, ${t.scalaType(arrayType, jsonCodec)}]")
+    case _: Object               =>
+      toType(
+        jsonCodec match
+          case JsonCodec.ZioJson  => "zio.json.ast.Json.Obj"
+          case JsonCodec.Jsoniter => "Json" // assuming the codecs package is imported
+      )
     case Enum(_, values, _) =>
       enumType match
         case SchemaType.EnumType.Literal       => toType(values.map(v => v.value).mkString("\"", "\" | \"", "\""))
         case SchemaType.EnumType.Nominal(name) => toType(name)
-    case _ => toType("String")
+    case _ =>
+      toType(
+        jsonCodec match
+          case JsonCodec.ZioJson  => "zio.json.ast.Json"
+          case JsonCodec.Jsoniter => "Json" // assuming the codecs package is imported
+      )
 
 object SchemaType:
   case class EnumValue(value: String, enumDescription: String)
@@ -751,11 +814,15 @@ object SchemaType:
     case Literal
     case Nominal(prefix: String)
 
-  private def toPrimitive(o: ujson.Obj, optional: Boolean) = SchemaType.Primitive(
-    `type` = o("type").str,
-    optional = optional,
-    format = o.value.get("format").map(_.str)
-  )
+  private def toPrimitiveOrAny(o: ujson.Obj, optional: Boolean) =
+    o("type").str match
+      case typ: ("string" | "integer" | "number" | "boolean") =>
+        SchemaType.Primitive(
+          `type` = typ,
+          optional = optional,
+          format = o.value.get("format").map(_.str)
+        )
+      case _ => Any(optional)
 
   def readType(context: SchemaPath, o: ujson.Obj): SchemaType =
     val desc = o.value.get("description").map(_.str)
@@ -794,9 +861,9 @@ object SchemaType:
                           .map(_.group(1))
                           .toList
                           .collect { case v: String => EnumValue(value = v, enumDescription = "") } match
-                          case Nil    => toPrimitive(o, optional)
+                          case Nil    => toPrimitiveOrAny(o, optional)
                           case values => SchemaType.Enum(typ = o("type").str, optional = optional, values = values)
-                      else toPrimitive(o, optional)
+                      else toPrimitiveOrAny(o, optional)
                     else SchemaType.Ref(context, optional)
 
 opaque type SchemaPath = Vector[String]

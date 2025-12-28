@@ -2,7 +2,7 @@
 //> using jvm system
 //> using scala 3.7.4
 //> using file ../../../../core/shared/src/main/scala/codegen.scala
-//> using dep com.lihaoyi::upickle:4.4.1
+//> using dep com.lihaoyi::upickle:4.4.2
 
 package gcp.codegen.cli
 

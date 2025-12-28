@@ -152,7 +152,8 @@ lazy val testProjects: CompositeProject = new CompositeProject {
             arrayType
           ),
           libraryDependencies ++= Seq(
-            "org.scalameta" %% "munit" % munitVersion % Test
+            "org.scalameta" %% "munit" % munitVersion % Test,
+            "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % jsoniterVersion % Test
           ) ++ dependencyByConfig(httpSource = httpSource, jsonCodec = jsonCodec, arrayType = arrayType)
         )
     }

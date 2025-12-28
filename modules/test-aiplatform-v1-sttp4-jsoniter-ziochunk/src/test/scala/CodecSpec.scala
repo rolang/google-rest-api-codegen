@@ -18,13 +18,8 @@ class CodecSpec extends munit.FunSuite {
                   |   }
                   |}""".stripMargin
 
-    case class NestedArgs(nestedArg1: String, nestedArg2: Boolean, nestedArg3: Option[String])
-    object NestedArgs:
-      given JsonValueCodec[NestedArgs] = JsonCodecMaker.make
-
-    case class Args(arg1: Int, arg2: NestedArgs)
-    object Args:
-      given JsonValueCodec[Args] = JsonCodecMaker.make
+    type Args = (arg1: Int, arg2: (nestedArg1: String, nestedArg2: Boolean, nestedArg3: Option[String]))
+    given JsonValueCodec[Args] = JsonCodecMaker.make
 
     val decoded = readFromString[GoogleCloudAiplatformV1FunctionCall](json)
     val args = decoded.args.map(_.readAs[Args])
@@ -32,6 +27,6 @@ class CodecSpec extends munit.FunSuite {
     assert(decoded.name == Some("func name"))
     assert(args.nonEmpty)
     assert(args.exists(_.isRight))
-    assert(args.flatMap(_.toOption).get == Args(1, NestedArgs("a", true, None)))
+    assert(args.flatMap(_.toOption).get == (arg1 = 1, arg2 = (nestedArg1 = "a", nestedArg2 = true, nestedArg3 = None)))
   }
 }

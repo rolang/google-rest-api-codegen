@@ -30,7 +30,8 @@ object GeneratorConfig:
     case Sttp4
 
   enum JsonCodec:
-    case ZioJson, Jsoniter
+    case ZioJson
+    case Jsoniter(jsonTypeRef: String)
 
   enum ArrayType {
     case List, Vector, Array, ZioChunk
@@ -159,15 +160,15 @@ def generateBySpec(
                     "import sttp.model.*\nimport sttp.client4.*, sttp.client4.ResponseException.{DeserializationException, UnexpectedStatusCode}"
                 },
                 config.jsonCodec match {
-                  case JsonCodec.ZioJson  => "import zio.json.*"
-                  case JsonCodec.Jsoniter => "import com.github.plokhotnyuk.jsoniter_scala.core.*"
+                  case JsonCodec.ZioJson     => "import zio.json.*"
+                  case _: JsonCodec.Jsoniter => "import com.github.plokhotnyuk.jsoniter_scala.core.*"
                 },
                 s"val resourceRequest: PartialRequest[Either[String, String]] = basicRequest.headers(Header.contentType(MediaType.ApplicationJson))",
                 "",
                 s"export ${config.outPkg}.QueryParameters",
                 "",
                 (config.httpSource, config.jsonCodec) match
-                  case (HttpSource.Sttp4, JsonCodec.Jsoniter) =>
+                  case (HttpSource.Sttp4, _: JsonCodec.Jsoniter) =>
                     """|def asJson[T : JsonValueCodec]: ResponseAs[Either[ResponseException[String], T]] =
                        |  asByteArrayAlways.mapWithMetadata((bytes, metadata) =>
                        |    if metadata.isSuccess then
@@ -238,6 +239,10 @@ def generateBySpec(
             schemas <- Future
               .traverse(specs.schemas) { (schemaPath, schema) =>
                 Future {
+                  val jsonType = config.jsonCodec match
+                    case JsonCodec.ZioJson               => "zio.json.ast.Json"
+                    case JsonCodec.Jsoniter(jsonTypeRef) => jsonTypeRef
+
                   val code =
                     (if schema.properties.nonEmpty then
                        schemasCode(
@@ -254,7 +259,7 @@ def generateBySpec(
                        val comment = toComment(schema.description)
                        s"""|package $schemasPkg
                            |
-                           |${comment}type ${schema.id.scalaName} = Option[""]""".stripMargin
+                           |${comment}type ${schema.id.scalaName} = Option[$jsonType]""".stripMargin
                     )
 
                   val path = schemasPath / s"${schemaPath.scalaName}.scala"
@@ -426,26 +431,26 @@ def schemasCode(
   def `def toJsonString`(objName: String) = jsonCodec match
     case JsonCodec.ZioJson =>
       s"def toJsonString: String = $objName.jsonCodec.encodeJson(this, None).toString()"
-    case JsonCodec.Jsoniter =>
+    case _: JsonCodec.Jsoniter =>
       s"def toJsonString: String = writeToString(this)"
 
   def jsonDecoder(objName: String) =
     List(
       s"object $objName {",
-      // Jsoniter doesn't support derivation from Scala 3 union types
-      if jsonCodec == JsonCodec.Jsoniter then
-        enums
-          .map((k, e) =>
-            s"  enum ${toScalaTypeName(k)} {\n${e.values.map(v => s"${toComment(Some(v.enumDescription), "    ")}    case ${toScalaName(v.value)}").mkString("\n  ")}\n  }\n"
-          )
-          .mkString("\n")
-      else "",
       jsonCodec match
         case JsonCodec.ZioJson =>
           s"  given jsonCodec: JsonCodec[$objName] = JsonCodec.derived[$objName]"
-        case JsonCodec.Jsoniter =>
-          s"""|  given jsonCodec: JsonValueCodec[$objName] = 
-              |    JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true).withDiscriminatorFieldName(None))""".stripMargin,
+        case _: JsonCodec.Jsoniter =>
+          // Jsoniter doesn't support derivation from Scala 3 union types
+          enums
+            .map((k, e) =>
+              s"  enum ${toScalaTypeName(k)} {\n${e.values.map(v => s"${toComment(Some(v.enumDescription), "    ")}    case ${toScalaName(v.value)}").mkString("\n  ")}\n  }\n"
+            )
+            .mkString("\n")
+            .appendedAll(
+              s"""|  given jsonCodec: JsonValueCodec[$objName] = 
+              |    JsonCodecMaker.make(CodecMakerConfig.withAllowRecursiveTypes(true).withDiscriminatorFieldName(None))""".stripMargin
+            ),
       "}"
     ).mkString("\n")
 
@@ -473,8 +478,8 @@ def schemasCode(
     s"package $pkg",
     "",
     jsonCodec match {
-      case JsonCodec.ZioJson  => "import zio.json.*"
-      case JsonCodec.Jsoniter =>
+      case JsonCodec.ZioJson     => "import zio.json.*"
+      case _: JsonCodec.Jsoniter =>
         """|import com.github.plokhotnyuk.jsoniter_scala.core.*
            |import com.github.plokhotnyuk.jsoniter_scala.macros.*""".stripMargin
     },
@@ -493,38 +498,8 @@ def commonSchemaCodecs(
     hasProps: SchemaPath => Boolean,
     arrType: ArrayType
 ): Option[(String, Boolean)] = {
-  (jsonCodec match
-    case JsonCodec.ZioJson  => Nil
-    case JsonCodec.Jsoniter =>
-      List(
-        s"""|package $pkg
-            |
-            |import com.github.plokhotnyuk.jsoniter_scala.core.*
-            |import com.github.plokhotnyuk.jsoniter_scala.macros.*
-            |
-            |opaque type Json = Array[Byte]
-            |
-            |object Json {
-            |
-            |  given codec: JsonValueCodec[Json] = new JsonValueCodec[Json] {
-            |    override def decodeValue(in: JsonReader, default: Json): Json = in.readRawValAsBytes()
-            |
-            |    override def encodeValue(x: Json, out: JsonWriter): Unit = out.writeRawVal(x)
-            |
-            |    override val nullValue: Json = new Array[Byte](0)
-            |  }
-            |
-            |  extension (v: Json) 
-            |    def readAsUnsafe[T: JsonValueCodec]: T = readFromArray(v)
-            |    def readAs[T: JsonValueCodec]: Either[Throwable, T] =
-            |      try
-            |        Right(readFromArray(v))
-            |      catch
-            |        case t: Throwable => Left(t)
-            |}""".stripMargin -> false
-      )
-  ).appendedAll((jsonCodec, arrType) match
-    case (JsonCodec.Jsoniter, ArrayType.ZioChunk) =>
+  ((jsonCodec, arrType) match
+    case (JsonCodec.Jsoniter(jsonType), ArrayType.ZioChunk) =>
       schemas.toList
         .flatMap((sk, sv) =>
           sv.sortedProperties(hasProps)
@@ -538,20 +513,21 @@ def commonSchemaCodecs(
         .distinct match
         case Nil   => Nil
         case props =>
+          // can hopefully remove all of this soon: https://github.com/plokhotnyuk/jsoniter-scala/pull/1350
           List(
             List(
               "",
               s"object $objName {",
               "",
               // to ensure codec for Chunk[Json] is added since it may not be present in props
-              """|  given JsonChunkCodec: JsonValueCodec[zio.Chunk[Json]] = new JsonValueCodec[zio.Chunk[Json]] {
-                 |    val arrCodec: JsonValueCodec[Array[Json]] = JsonCodecMaker.make
-                 |  
-                 |    override val nullValue: zio.Chunk[Json] = zio.Chunk.empty
-                 |  
-                 |    override def decodeValue(in: JsonReader, default: zio.Chunk[Json]): zio.Chunk[Json] =
+              s"""|  given JsonChunkCodec: JsonValueCodec[zio.Chunk[$jsonType]] = new JsonValueCodec[zio.Chunk[$jsonType]] {
+                 |    val arrCodec: JsonValueCodec[Array[$jsonType]] = JsonCodecMaker.make
+                 |
+                 |    override val nullValue: zio.Chunk[$jsonType] = zio.Chunk.empty
+                 |
+                 |    override def decodeValue(in: JsonReader, default: zio.Chunk[$jsonType]): zio.Chunk[$jsonType] =
                  |      zio.Chunk.fromArray(arrCodec.decodeValue(in, default.toArray))
-                 |  
+                 |
                  |    override def encodeValue(x: zio.Chunk[Json], out: JsonWriter): Unit =
                  |      arrCodec.encodeValue(x.toArray, out)
                  |  }""".stripMargin,
@@ -576,10 +552,10 @@ def commonSchemaCodecs(
               "}"
             ).mkString("\n") -> true
           )
-    case _ => Nil) match
+    case _ => Nil
+  ) match
     case Nil    => None
     case codecs => Some((codecs.map(_._1).mkString("\n"), codecs.exists(_._2)))
-
 }
 
 case class FlatPath(path: String, params: List[String])
@@ -793,8 +769,8 @@ enum SchemaType(val optional: Boolean):
     case _: Object               =>
       toType(
         jsonCodec match
-          case JsonCodec.ZioJson  => "zio.json.ast.Json.Obj"
-          case JsonCodec.Jsoniter => "Json" // assuming the codecs package is imported
+          case JsonCodec.ZioJson           => "zio.json.ast.Json.Obj"
+          case JsonCodec.Jsoniter(jsonRef) => jsonRef
       )
     case Enum(_, values, _) =>
       enumType match
@@ -803,8 +779,8 @@ enum SchemaType(val optional: Boolean):
     case _ =>
       toType(
         jsonCodec match
-          case JsonCodec.ZioJson  => "zio.json.ast.Json"
-          case JsonCodec.Jsoniter => "Json" // assuming the codecs package is imported
+          case JsonCodec.ZioJson           => "zio.json.ast.Json"
+          case JsonCodec.Jsoniter(jsonRef) => jsonRef
       )
 
 object SchemaType:

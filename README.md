@@ -25,7 +25,7 @@ See example under [example/generate.scala](./example/generate.scala).
 
 ```scala
 //> using scala 3.7.4
-//> using dep dev.rolang::gcp-codegen::0.0.13
+//> using dep dev.rolang::gcp-codegen::0.0.12
 
 import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 

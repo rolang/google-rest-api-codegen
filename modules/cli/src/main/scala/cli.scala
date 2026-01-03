@@ -57,7 +57,6 @@ private def argsToTask(args: Seq[String]): Either[String, Task] =
       .get("-http-source")
       .flatMap(v => HttpSource.values.find(_.toString().equalsIgnoreCase(v)))
       .toRight("Missing or invalid -http-source")
-    customJsoniterJsonRef = argsMap.get("-jsoniter-json-type")
     jsonCodec <- (
       argsMap
         .get("-json-codec")

@@ -24,8 +24,8 @@ The generator can be used with any tool that can perform system calls to a comma
 See example under [example/generate.scala](./example/generate.scala).
 
 ```scala
-//> using scala 3.7.3
-//> using dep dev.rolang::gcp-codegen::0.0.8
+//> using scala 3.7.4
+//> using dep dev.rolang::gcp-codegen::0.0.12
 
 import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 
@@ -55,13 +55,41 @@ See output in `example/out`.
 
 | Configuration       | Description | Options | Default |
 | ------------------- | ---------------- | ------- | --- |
-| -specs             | Can be `stdin` or a path to the JSON file. | | |
-| -out-dir           | Ouput directory | | |
-| -out-pkg           | Output package |  | |
-| -http-source       | Generated http source. | [Sttp4](https://sttp.softwaremill.com/en/stable) | |
-| -json-codec        | Generated JSON codec | [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)  | |
-| -array-type        | Collection type for JSON arrays | `List`, `Vector`, `Array`, `ZioChunk` | `List` |
-| -include-resources | Optional resource filter. | | |
+| -specs              | Can be `stdin` or a path to the JSON file. | | |
+| -out-dir            | Output directory | | |
+| -out-pkg            | Output package |  | |
+| -http-source        | Generated http source. | [Sttp4](https://sttp.softwaremill.com/en/stable) | |
+| -json-codec         | Generated JSON codec | [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)  | |
+| -jsoniter-json-type | In case of Jsoniter a fully qualified name of the custom type that can represent a raw Json value | |
+| -array-type         | Collection type for JSON arrays | `List`, `Vector`, `Array`, `ZioChunk` | `List` |
+| -include-resources  | Optional resource filter. | | |
+
+##### Jsoniter Json type and codec example
+Jsoniter doesn't ship with a type that can represent raw Json values to be used for mapping of `any` / `object` types,  
+but it provides methods to read / write raw values as bytes (related [issue](https://github.com/plokhotnyuk/jsoniter-scala/issues/1257)).  
+Given that we can create a custom type with a codec which can look for example like [that](modules/example-jsoniter-json/shared/src/main/scala/json.scala):
+```scala
+package example.jsoniter
+import com.github.plokhotnyuk.jsoniter_scala.core.*
+
+opaque type Json = Array[Byte]
+object Json:
+  def writeToJson[T: JsonValueCodec](v: T): Json = writeToArray[T](v)
+
+  given codec: JsonValueCodec[Json] = new JsonValueCodec[Json]:
+    override def decodeValue(in: JsonReader, default: Json): Json = in.readRawValAsBytes()
+    override def encodeValue(x: Json, out: JsonWriter): Unit = out.writeRawVal(x)
+    override val nullValue: Json = Array[Byte](0)
+
+  extension (v: Json)
+    def readAsUnsafe[T: JsonValueCodec]: T = readFromArray(v)
+    def readAs[T: JsonValueCodec]: Either[Throwable, T] =
+      try Right(readFromArray(v))
+      catch case t: Throwable => Left(t)
+```
+Then pass it as argument to the code generator like `-jsoniter-json-type=_root_.example.jsoniter.Json`.  
+Since this type and codec can be shared across generated clients it has to be provided (at least for now)
+instead of being generated for each client to avoid duplicated / redundant code.  
 
 ##### Examples:
 
@@ -79,7 +107,7 @@ curl 'https://pubsub.googleapis.com/$discovery/rest?version=v1' > pubsub_v1.json
   -specs=./pubsub_v1.json \
   -out-pkg=gcp.pubsub.v1 \
   -http-source=sttp4 \
-  -json-codec=jsoniter \
+  -json-codec=ziojson \
   -include-resources='projects.*,!projects.snapshots' # optional filters
 ```
 

@@ -1,5 +1,5 @@
-//> using scala 3.7.3
-//> using dep dev.rolang::gcp-codegen::0.0.8
+//> using scala 3.7.4
+//> using dep dev.rolang::gcp-codegen::0.0.12
 
 import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
 
@@ -10,7 +10,7 @@ import gcp.codegen.*, java.nio.file.*, GeneratorConfig.*
       outDir = Path.of("out"),
       outPkg = "example.pubsub.v1",
       httpSource = HttpSource.Sttp4,
-      jsonCodec = JsonCodec.Jsoniter,
+      jsonCodec = JsonCodec.ZioJson,
       arrayType = ArrayType.List,
       preprocess = specs => specs
     )

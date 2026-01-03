@@ -31,10 +31,10 @@ import scala.concurrent.duration.*
 
 private def argsToTask(args: Seq[String]): Either[String, Task] =
   val argsMap = args.toList
-    .flatMap(_.split('=').map(_.trim().toLowerCase()))
+    .flatMap(_.split('=').map(_.trim()))
     .sliding(2, 2)
     .collect { case a :: b :: _ =>
-      a -> b
+      a.toLowerCase() -> b
     }
     .toMap
 
@@ -57,10 +57,17 @@ private def argsToTask(args: Seq[String]): Either[String, Task] =
       .get("-http-source")
       .flatMap(v => HttpSource.values.find(_.toString().equalsIgnoreCase(v)))
       .toRight("Missing or invalid -http-source")
-    jsonCodec <- argsMap
-      .get("-json-codec")
-      .flatMap(v => JsonCodec.values.find(_.toString().equalsIgnoreCase(v)))
-      .toRight("Missing or invalid -json-codec")
+    jsonCodec <- (
+      argsMap
+        .get("-json-codec")
+        .map(_.toLowerCase()),
+      argsMap.get("-jsoniter-json-type")
+    ) match {
+      case (Some("ziojson"), _)               => Right(JsonCodec.ZioJson)
+      case (Some("jsoniter"), Some(jsonType)) => Right(JsonCodec.Jsoniter(jsonType))
+      case (Some("jsoniter"), None)           => Left("Missing -jsoniter-json-type")
+      case _                                  => Left("Missing or invalid -json-codec")
+    }
     arrayType <- argsMap.get("-array-type") match
       case None    => Right(ArrayType.List)
       case Some(v) => ArrayType.values.find(_.toString().equalsIgnoreCase(v)).toRight(s"Invalid array-type $v")

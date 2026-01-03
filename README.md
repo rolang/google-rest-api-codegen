@@ -56,7 +56,7 @@ See output in `example/out`.
 | Configuration       | Description | Options | Default |
 | ------------------- | ---------------- | ------- | --- |
 | -specs              | Can be `stdin` or a path to the JSON file. | | |
-| -out-dir            | Ouput directory | | |
+| -out-dir            | Output directory | | |
 | -out-pkg            | Output package |  | |
 | -http-source        | Generated http source. | [Sttp4](https://sttp.softwaremill.com/en/stable) | |
 | -json-codec         | Generated JSON codec | [Jsoniter](https://github.com/plokhotnyuk/jsoniter-scala), [ZioJson](https://zio.dev/zio-json)  | |

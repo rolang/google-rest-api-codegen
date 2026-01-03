@@ -58,8 +58,8 @@ lazy val root = (project in file("."))
   .aggregate(
     core.native,
     core.jvm,
-    customJsoniterJson.native,
-    customJsoniterJson.jvm,
+    exampleJsoniterJson.native,
+    exampleJsoniterJson.jvm,
     cli
   )
   .aggregate(testProjects.componentProjects.map(p => LocalProject(p.id)) *)
@@ -67,7 +67,7 @@ lazy val root = (project in file("."))
 
 // for supporting code inspection / testing of generated code via test_gen.sh script
 lazy val testLocal = (project in file("test-local"))
-  .dependsOn(customJsoniterJson.jvm)
+  .dependsOn(exampleJsoniterJson.jvm)
   .settings(
     libraryDependencies ++= Seq(
       "com.softwaremill.sttp.client4" %% "core" % sttpClient4Version,
@@ -104,12 +104,12 @@ lazy val cli = project
     nativeConfig := nativeConfig.value.withMultithreading(false)
   )
 
-lazy val customJsoniterJson = crossProject(JVMPlatform, NativePlatform)
-  .in(file("modules/custom-jsoniter-json"))
+lazy val exampleJsoniterJson = crossProject(JVMPlatform, NativePlatform)
+  .in(file("modules/example-jsoniter-json"))
   .settings(noPublish)
   .settings(
-    name := "custom-jsoniter-json",
-    moduleName := "custom-jsoniter-json"
+    name := "example-jsoniter-json",
+    moduleName := "example-jsoniter-json"
   )
   .settings(
     libraryDependencies ++= Seq(
@@ -174,7 +174,7 @@ lazy val testProjects: CompositeProject = new CompositeProject {
         )
 
       if (jsonCodec == "Jsoniter") {
-        p.dependsOn(customJsoniterJson.componentProjects.map(p => ClasspathDependency(p, p.configuration)) *)
+        p.dependsOn(exampleJsoniterJson.componentProjects.map(p => ClasspathDependency(p, p.configuration)) *)
       } else {
         p
       }
@@ -258,7 +258,8 @@ def codegenTask(
       s"-out-pkg=$basePkgName",
       s"-http-source=$httpSource",
       s"-json-codec=$jsonCodec",
-      s"-array-type=$arrayType"
+      s"-array-type=$arrayType",
+      s"-jsoniter-json-type=_root_.example.jsoniter.Json"
     ).mkString(" ") ! ProcessLogger(l => logger.info(l), e => errs += e)) match {
       case 0 => ()
       case c => throw new InterruptedException(s"Failure on code generation: ${errs.mkString("\n")}")

@@ -1,8 +1,6 @@
-package custom.jsoniter
+package example.jsoniter
 
-import com.github.plokhotnyuk.jsoniter_scala.core.JsonValueCodec
-import com.github.plokhotnyuk.jsoniter_scala.core.JsonReader
-import com.github.plokhotnyuk.jsoniter_scala.core.{JsonWriter, writeToArray, readFromArray}
+import com.github.plokhotnyuk.jsoniter_scala.core.*
 
 opaque type Json = Array[Byte]
 object Json:

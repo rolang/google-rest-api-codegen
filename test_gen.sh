@@ -19,5 +19,5 @@ scala modules/cli/src/main/scala/cli.scala -- \
     -out-pkg=gcp.${spec}.${version}.${http_source}.${json_codec}.$array_type \
     -http-source=$http_source \
     -json-codec=$json_codec \
-    -jsoniter-json-type=custom.jsoniter.Json \
+    -jsoniter-json-type=_root_.custom.jsoniter.Json \
     -array-type=$array_type

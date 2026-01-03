@@ -8,7 +8,7 @@ spec=aiplatform
 version=v1
 json_codec=jsoniter
 http_source=sttp4
-array_type=list
+array_type=ziochunk
 out_dir=test-local/src/main/scala/test-$spec-$version/$http_source/$spec/$json_codec
 rm -rf $out_dir && mkdir -p $out_dir
 
@@ -19,4 +19,5 @@ scala modules/cli/src/main/scala/cli.scala -- \
     -out-pkg=gcp.${spec}.${version}.${http_source}.${json_codec}.$array_type \
     -http-source=$http_source \
     -json-codec=$json_codec \
+    -jsoniter-json-type=custom.jsoniter.Json \
     -array-type=$array_type

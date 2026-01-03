@@ -222,20 +222,6 @@ def generateBySpec(
             },
           // generate schemas with properties
           for {
-            (commonCodecs, hasExtraCodecs) <- Future {
-              commonSchemaCodecs(
-                schemas = specs.schemas.filter(_._2.properties.nonEmpty),
-                pkg = schemasPkg,
-                objName = commonCodecsObj,
-                jsonCodec = config.jsonCodec,
-                hasProps = p => specs.hasProps(p),
-                arrType = config.arrayType
-              ) match
-                case None                            => (Nil, false)
-                case Some((content, hasExtraCodecs)) =>
-                  Files.writeString(commonCodecsPath, content)
-                  (List(commonCodecsPath.toFile()), hasExtraCodecs)
-            }
             schemas <- Future
               .traverse(specs.schemas) { (schemaPath, schema) =>
                 Future {
@@ -250,9 +236,7 @@ def generateBySpec(
                          pkg = schemasPkg,
                          jsonCodec = config.jsonCodec,
                          hasProps = p => specs.hasProps(p),
-                         arrType = config.arrayType,
-                         commonCodecsPkg =
-                           if commonCodecs.nonEmpty && hasExtraCodecs then Some(commonCodecsPkg) else None
+                         arrType = config.arrayType
                        )
                      else
                        // create a type alias for objects without properties
@@ -267,7 +251,7 @@ def generateBySpec(
                   path.toFile()
                 }
               }
-          } yield commonCodecs ::: schemas.toList
+          } yield schemas.toList
         )
       )
       .map(_.flatten)
@@ -420,8 +404,7 @@ def schemasCode(
     pkg: String,
     jsonCodec: JsonCodec,
     hasProps: SchemaPath => Boolean,
-    arrType: ArrayType,
-    commonCodecsPkg: Option[String]
+    arrType: ArrayType
 ): String = {
   def enums =
     schema.properties.collect:
@@ -483,79 +466,8 @@ def schemasCode(
         """|import com.github.plokhotnyuk.jsoniter_scala.core.*
            |import com.github.plokhotnyuk.jsoniter_scala.macros.*""".stripMargin
     },
-    commonCodecsPkg match
-      case Some(codecsPkg) => s"import $codecsPkg.given"
-      case _               => "",
     toSchemaClass(schema)
   ).mkString("\n")
-}
-
-def commonSchemaCodecs(
-    schemas: Map[SchemaPath, Schema],
-    pkg: String,
-    objName: String,
-    jsonCodec: JsonCodec,
-    hasProps: SchemaPath => Boolean,
-    arrType: ArrayType
-): Option[(String, Boolean)] = {
-  ((jsonCodec, arrType) match
-    case (JsonCodec.Jsoniter(jsonType), ArrayType.ZioChunk) =>
-      schemas.toList
-        .flatMap((sk, sv) =>
-          sv.sortedProperties(hasProps)
-            .collect { case (k, Property(_, SchemaType.Array(typ, _), _)) =>
-              val enumType =
-                if jsonCodec == JsonCodec.ZioJson then SchemaType.EnumType.Literal
-                else SchemaType.EnumType.Nominal(s"${sk.lastOption.getOrElse("")}.${toScalaTypeName(k)}")
-              typ.scalaType(arrType, jsonCodec, enumType)
-            }
-        )
-        .distinct match
-        case Nil   => Nil
-        case props =>
-          // can hopefully remove all of this soon: https://github.com/plokhotnyuk/jsoniter-scala/pull/1350
-          List(
-            List(
-              "",
-              s"object $objName {",
-              "",
-              // to ensure codec for Chunk[Json] is added since it may not be present in props
-              s"""|  given JsonChunkCodec: JsonValueCodec[zio.Chunk[$jsonType]] = new JsonValueCodec[zio.Chunk[$jsonType]] {
-                 |    val arrCodec: JsonValueCodec[Array[$jsonType]] = JsonCodecMaker.make
-                 |
-                 |    override val nullValue: zio.Chunk[$jsonType] = zio.Chunk.empty
-                 |
-                 |    override def decodeValue(in: JsonReader, default: zio.Chunk[$jsonType]): zio.Chunk[$jsonType] =
-                 |      zio.Chunk.fromArray(arrCodec.decodeValue(in, default.toArray))
-                 |
-                 |    override def encodeValue(x: zio.Chunk[Json], out: JsonWriter): Unit =
-                 |      arrCodec.encodeValue(x.toArray, out)
-                 |  }""".stripMargin,
-              "",
-              props
-                .filterNot(_ == "Json") // to void duplicate codec for Chunk[Json]
-                .map { t =>
-                  val prefix = "  given " + toScalaName(t + "ChunkCodec")
-                  s"""|${prefix}: JsonValueCodec[zio.Chunk[$t]] = new JsonValueCodec[zio.Chunk[$t]] {
-                          |    val arrCodec: JsonValueCodec[Array[$t]] = JsonCodecMaker.make
-                          |
-                          |    override val nullValue: zio.Chunk[$t] = zio.Chunk.empty
-                          |
-                          |    override def decodeValue(in: JsonReader, default: zio.Chunk[$t]): zio.Chunk[$t] =
-                          |      zio.Chunk.fromArray(arrCodec.decodeValue(in, default.toArray))
-                          |
-                          |    override def encodeValue(x: zio.Chunk[$t], out: JsonWriter): Unit =
-                          |      arrCodec.encodeValue(x.toArray, out)
-                          |}""".stripMargin
-                }
-                .mkString("\n\n"),
-              "}"
-            ).mkString("\n") -> true
-          )
-    case _ => Nil
-  ) match
-    case Nil    => None
-    case codecs => Some((codecs.map(_._1).mkString("\n"), codecs.exists(_._2)))
 }
 
 case class FlatPath(path: String, params: List[String])

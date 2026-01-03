@@ -46,7 +46,7 @@ val zioVersion = "2.1.23"
 
 val zioJsonVersion = "0.8.0"
 
-val jsoniterVersion = "2.38.6"
+val jsoniterVersion = "2.38.8"
 
 val munitVersion = "1.2.1"
 
@@ -58,6 +58,8 @@ lazy val root = (project in file("."))
   .aggregate(
     core.native,
     core.jvm,
+    customJsoniterJson.native,
+    customJsoniterJson.jvm,
     cli
   )
   .aggregate(testProjects.componentProjects.map(p => LocalProject(p.id)) *)
@@ -65,6 +67,7 @@ lazy val root = (project in file("."))
 
 // for supporting code inspection / testing of generated code via test_gen.sh script
 lazy val testLocal = (project in file("test-local"))
+  .dependsOn(customJsoniterJson.jvm)
   .settings(
     libraryDependencies ++= Seq(
       "com.softwaremill.sttp.client4" %% "core" % sttpClient4Version,
@@ -99,6 +102,20 @@ lazy val cli = project
     name := "gcp-codegen-cli",
     moduleName := "gcp-codegen-cli",
     nativeConfig := nativeConfig.value.withMultithreading(false)
+  )
+
+lazy val customJsoniterJson = crossProject(JVMPlatform, NativePlatform)
+  .in(file("modules/custom-jsoniter-json"))
+  .settings(noPublish)
+  .settings(
+    name := "custom-jsoniter-json",
+    moduleName := "custom-jsoniter-json"
+  )
+  .settings(
+    libraryDependencies ++= Seq(
+      "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core" % jsoniterVersion,
+      "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % jsoniterVersion % "compile-internal"
+    )
   )
 
 def dependencyByConfig(httpSource: String, jsonCodec: String, arrayType: String): Seq[ModuleID] = {
@@ -136,7 +153,7 @@ lazy val testProjects: CompositeProject = new CompositeProject {
       arrayType <- Seq("ZioChunk", "List")
       id = s"test-$apiName-$apiVersion-${httpSource}-${jsonCodec}-${arrayType}".toLowerCase()
     } yield {
-      Project
+      val p = Project
         .apply(
           id = id,
           base = file("modules") / id
@@ -155,6 +172,12 @@ lazy val testProjects: CompositeProject = new CompositeProject {
             "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % jsoniterVersion % Test
           ) ++ dependencyByConfig(httpSource = httpSource, jsonCodec = jsonCodec, arrayType = arrayType)
         )
+
+      if (jsonCodec == "Jsoniter") {
+        p.dependsOn(customJsoniterJson.componentProjects.map(p => ClasspathDependency(p, p.configuration)) *)
+      } else {
+        p
+      }
     }
 }
 

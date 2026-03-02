@@ -806,7 +806,7 @@ object Schema:
     Schema(
       id = name,
       description = data.value.get("description").map(_.str),
-      properties = readProps(data("properties").obj, name.add("properties"))
+      properties = data.value.get("properties").map(_.obj).map(readProps(_, name.add("properties"))).getOrElse(Nil)
     )
 
   def readSchemas(o: ujson.Obj): Map[SchemaPath, Schema] = {

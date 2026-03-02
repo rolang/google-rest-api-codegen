@@ -1,8 +1,8 @@
 // for test runs using scala-cli
 //> using jvm system
-//> using scala 3.7.4
+//> using scala 3.8.2
 //> using file ../../../../core/shared/src/main/scala/codegen.scala
-//> using dep com.lihaoyi::upickle:4.4.2
+//> using dep com.lihaoyi::upickle:4.4.3
 
 package gcp.codegen.cli
 
@@ -26,7 +26,8 @@ import scala.concurrent.duration.*
         sys.exit(0)
       catch
         case err: Throwable =>
-          Console.err.println(s"Failure: ${err.getMessage()}")
+          Console.err.println(s"Failure on code generation: ${err.getMessage()}")
+          err.printStackTrace(Console.err)
           sys.exit(1)
 
 private def argsToTask(args: Seq[String]): Either[String, Task] =

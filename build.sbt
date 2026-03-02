@@ -2,7 +2,7 @@ ThisBuild / description := "Google Cloud client code generator"
 ThisBuild / organization := "dev.rolang"
 ThisBuild / licenses := Seq(License.MIT)
 ThisBuild / homepage := Some(url("https://github.com/rolang/google-rest-api-codegen"))
-ThisBuild / scalaVersion := "3.7.4"
+ThisBuild / scalaVersion := "3.8.2"
 ThisBuild / version ~= { v => if (v.contains('+')) s"${v.replace('+', '-')}-SNAPSHOT" else v }
 ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / scmInfo := Some(
@@ -50,7 +50,7 @@ val jsoniterVersion = "2.38.8"
 
 val munitVersion = "1.2.1"
 
-val upickleVersion = "4.4.2"
+val upickleVersion = "4.4.3"
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 

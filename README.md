@@ -67,7 +67,7 @@ See output in `example/out`.
 ##### Jsoniter Json type and codec example
 Jsoniter doesn't ship with a type that can represent raw Json values to be used for mapping of `any` / `object` types,  
 but it provides methods to read / write raw values as bytes (related [issue](https://github.com/plokhotnyuk/jsoniter-scala/issues/1257)).  
-Given that we can create a custom type with a codec which can look for example like [that](modules/example-jsoniter-json/shared/src/main/scala/json.scala):
+Given that we can create a custom type with a codec which can look for example like [that](modules/example-jsoniter-json/src/main/scala/json.scala):
 ```scala
 package example.jsoniter
 import com.github.plokhotnyuk.jsoniter_scala.core.*

@@ -1,0 +1,237 @@
+package build
+
+import mill.*
+import mill.scalalib.*
+import mill.scalanativelib.*
+import mill.scalanativelib.api.*
+import mill.scalalib.publish.*
+import mill.util.VcsVersionModule
+import mill.api.Task.Simple
+import os.Path
+
+val scalaVer = "3.8.3"
+
+val scalaNativeVer = "0.5.11"
+
+val sttpClient4Ver = "4.0.23"
+
+val zioVer = "2.1.26"
+
+val zioJsonVer = "0.9.1"
+
+val jsoniterVer = "2.38.11"
+
+val munitVer = "1.3.0"
+
+val upickleVer = "4.4.3"
+
+def cliBinPath: os.Path = {
+  def normalise(s: String) = s.toLowerCase.replaceAll("[^a-z0-9]+", "")
+  val props = sys.props.toMap
+  val osName = normalise(props.getOrElse("os.name", "")) match {
+    case p if p.startsWith("linux")                         => "linux"
+    case p if p.startsWith("windows")                       => "windows"
+    case p if p.startsWith("osx") || p.startsWith("macosx") => "macosx"
+    case _                                                  => "unknown"
+  }
+  val arch = (
+    normalise(props.getOrElse("os.arch", "")),
+    props.getOrElse("sun.arch.data.model", "64")
+  ) match {
+    case ("amd64" | "x64" | "x8664" | "x86", bits) => s"x86_$bits"
+    case ("aarch64" | "arm64", bits)               => s"aarch$bits"
+    case _                                         => "unknown"
+  }
+  os.pwd / "target" / "bin" / s"gcp-codegen-$arch-$osName"
+}
+
+/** Build the Scala Native CLI binary and copy it to target/bin/<arch>-<os> */
+def buildCliBinary: T[PathRef] = Task {
+  val linked = cli.nativeLink()
+  val dest = cliBinPath
+  os.makeDir.all(dest / os.up)
+  os.copy.over(linked.path, dest)
+  PathRef(dest)
+}
+
+trait Publishable extends PublishModule with VcsVersionModule {
+  def pomSettings = PomSettings(
+    description = "Google Cloud client code generator",
+    organization = "dev.rolang",
+    url = "https://github.com/rolang/google-rest-api-codegen",
+    licenses = Seq(License.MIT),
+    versionControl = VersionControl.github("rolang", "google-rest-api-codegen"),
+    developers = Seq(
+      Developer(id = "rolang", name = "Roman Langolf", url = "https://rolang.dev", email = "rolang@pm.me")
+    )
+  )
+}
+
+// ---------------------------------------------------------------------------
+// core: published as gcp-codegen, JVM + Scala Native
+// ---------------------------------------------------------------------------
+
+object core extends Module {
+  // jvm and native share src via SbtModule's parent-dir convention:
+  //   <moduleDir>/jvm/../src/main/scala == <moduleDir>/src/main/scala
+
+  trait CoreModule extends ScalaModule with SbtModule with Publishable {
+    override def moduleDir: Path = super.moduleDir / ".." / ".." / "modules" / "core"
+
+    def scalaVersion = scalaVer
+    override def artifactName = Task { "gcp-codegen" }
+    override def mvnDeps = Task { Seq(mvn"com.lihaoyi::upickle::$upickleVer") }
+  }
+
+  object jvm extends CoreModule
+
+  object native extends CoreModule with ScalaNativeModule {
+    def scalaNativeVersion = scalaNativeVer
+    override def nativeMultithreading: T[Option[Boolean]] = Task { Some(false) }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// cli: published as gcp-codegen-cli, Scala Native binary
+// ---------------------------------------------------------------------------
+
+object cli extends ScalaNativeModule with Publishable with SbtModule {
+  override def moduleDir: Path = super.moduleDir / ".." / "modules" / "cli"
+  def scalaVersion = scalaVer
+  def scalaNativeVersion = scalaNativeVer
+  override def moduleDeps = Seq(core.native)
+  override def artifactName = Task { "gcp-codegen-cli" }
+  override def nativeMultithreading: T[Option[Boolean]] = Task { Some(false) }
+  override def releaseMode: T[ReleaseMode] = Task { ReleaseMode.ReleaseFast }
+}
+
+// ---------------------------------------------------------------------------
+// example-jsoniter-json: not published, JVM + Scala Native
+// ---------------------------------------------------------------------------
+
+object exampleJsoniterJson extends Module {
+  trait ExampleModule extends ScalaModule with SbtModule {
+    def moduleDir = moduleDir / ".." / ".." / "modules" / "example-jsoniter-json"
+
+    def scalaVersion = scalaVer
+    override def mvnDeps = Task { Seq(mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:$jsoniterVer") }
+    override def compileMvnDeps = Task {
+      Seq(mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-macros:$jsoniterVer")
+    }
+  }
+
+  object jvm extends ExampleModule
+
+  object native extends ExampleModule with ScalaNativeModule {
+    def scalaNativeVersion = scalaNativeVer
+  }
+}
+
+// ---------------------------------------------------------------------------
+// testLocal: local dev helper, not published
+// ---------------------------------------------------------------------------
+
+object testLocal extends ScalaModule {
+  override def sources = Task.Sources(os.pwd / "test-local" / "src" / "main" / "scala")
+  def scalaVersion = scalaVer
+  override def moduleDeps = Seq(exampleJsoniterJson.jvm)
+  override def mvnDeps = Task {
+    Seq(
+      mvn"com.softwaremill.sttp.client4::core:$sttpClient4Ver",
+      mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:$jsoniterVer",
+      mvn"dev.zio::zio-json:$zioJsonVer",
+      mvn"dev.zio::zio:$zioVer"
+    )
+  }
+  override def compileMvnDeps = Task {
+    Seq(mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-macros:$jsoniterVer")
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Test modules: one per (api, version, httpSource, jsonCodec, arrayType) combo
+// ---------------------------------------------------------------------------
+
+type TestKey = (String, String, String, String, String)
+
+val testCombos: Seq[TestKey] = for {
+  (apiName, apiVersion) <- Seq(
+    "pubsub" -> "v1",
+    "storage" -> "v1",
+    "aiplatform" -> "v1",
+    "iamcredentials" -> "v1",
+    "redis" -> "v1",
+    "sheets" -> "v4"
+  )
+  httpSource <- Seq("Sttp4")
+  jsonCodec <- Seq("ZioJson", "Jsoniter")
+  arrayType <- Seq("ZioChunk", "List")
+} yield (apiName, apiVersion, httpSource, jsonCodec, arrayType)
+
+object tests extends Cross[TestModule](testCombos)
+trait TestModule extends Cross.Module5[String, String, String, String, String] with ScalaModule {
+  val apiName = crossValue
+  val apiVersion = crossValue2
+  val httpSource = crossValue3
+  val jsonCodec = crossValue4
+  val arrayType = crossValue5
+
+  def scalaVersion = scalaVer
+
+  override def scalacOptions: T[Seq[String]] =
+    Task { super.scalacOptions() ++ Seq("-Xmax-inlines:64") }
+
+  override def sources: T[Seq[PathRef]] = Task { Seq.empty[PathRef] }
+
+  override def moduleDeps: Seq[JavaModule] =
+    if (jsonCodec == "Jsoniter") Seq(exampleJsoniterJson.jvm) else Seq()
+
+  override def mvnDeps: T[Seq[Dep]] = Task {
+    Seq(mvn"com.softwaremill.sttp.client4::core:$sttpClient4Ver") ++
+      (jsonCodec match {
+        case "Jsoniter" => Seq(mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:$jsoniterVer")
+        case "ZioJson"  => Seq(mvn"dev.zio::zio-json:$zioJsonVer")
+        case other      => sys.error(s"Unknown jsonCodec: $other")
+      }) ++
+      (arrayType match {
+        case "ZioChunk" => Seq(mvn"dev.zio::zio:$zioVer")
+        case _          => Seq.empty
+      })
+  }
+
+  override def compileMvnDeps: T[Seq[Dep]] = Task {
+    if (jsonCodec == "Jsoniter")
+      Seq(mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-macros:$jsoniterVer")
+    else Seq.empty
+  }
+
+  override def generatedSources: T[Seq[PathRef]] = Task {
+    val dest = Task.dest
+    val basePkg = s"gcp.$apiName.$apiVersion.${httpSource}_${jsonCodec}_${arrayType}".toLowerCase()
+    val outSrcDir = dest / "scala"
+    val specFile =
+      os.pwd / "modules" / "test-resources" / "src" / "main" / "resources" / s"${apiName}_${apiVersion}.json"
+    os.makeDir.all(outSrcDir)
+    os.proc(
+      cliBinPath,
+      s"-specs=$specFile",
+      s"-out-dir=$outSrcDir",
+      s"-out-pkg=$basePkg",
+      s"-http-source=$httpSource",
+      s"-json-codec=$jsonCodec",
+      s"-array-type=$arrayType",
+      s"-jsoniter-json-type=_root_.example.jsoniter.Json"
+    ).call(cwd = os.pwd)
+    Seq(PathRef(dest))
+  }
+
+  object test extends ScalaTests {
+    override def mvnDeps: T[Seq[Dep]] = Task {
+      Seq(
+        mvn"org.scalameta::munit:$munitVer",
+        mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-macros:$jsoniterVer"
+      )
+    }
+    def testFramework = "munit.Framework"
+  }
+}

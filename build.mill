@@ -11,7 +11,7 @@ import os.Path
 
 val scalaVer = "3.8.3"
 
-val scalaNativeVer = "0.5.11"
+val scalaNativeVer = "0.5.12"
 
 val sttpClient4Ver = "4.0.23"
 
@@ -19,7 +19,7 @@ val zioVer = "2.1.26"
 
 val zioJsonVer = "0.9.1"
 
-val jsoniterVer = "2.38.11"
+val jsoniterVer = "2.38.12"
 
 val munitVer = "1.3.0"
 

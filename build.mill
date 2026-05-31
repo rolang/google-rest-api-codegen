@@ -111,7 +111,7 @@ object cli extends ScalaNativeModule with Publishable with SbtModule {
 
 object exampleJsoniterJson extends Module {
   trait ExampleModule extends ScalaModule with SbtModule {
-    def moduleDir = moduleDir / ".." / ".." / "modules" / "example-jsoniter-json"
+    def moduleDir = os.pwd / "modules" / "example-jsoniter-json"
 
     def scalaVersion = scalaVer
     override def mvnDeps = Task { Seq(mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:$jsoniterVer") }

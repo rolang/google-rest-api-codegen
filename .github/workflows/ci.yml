@@ -13,14 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: coursier/cache-action@v6
-      - uses: VirtusLab/scala-cli-setup@main
+      - uses: actions/setup-java@v4
         with:
-          jvm: temurin:21
-          apps: sbt
-          power: true
+          java-version: 25
+          distribution: temurin
       - name: Start up emulators
-        run: docker compose up -d 
-      - run: sbt buildCliBinary test
+        run: docker compose up -d
+      - run: ./mill tests.__.test
   publish:
     runs-on: ubuntu-latest
     name: Publish Artifacts
@@ -29,17 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: coursier/cache-action@v6
-      - uses: VirtusLab/scala-cli-setup@main
+      - uses: actions/setup-java@v4
         with:
-          jvm: temurin:21
-          apps: sbt
+          java-version: 25
+          distribution: temurin
       - name: Import signing key
         if: env.PGP_SECRET != '' && env.PGP_PASSPHRASE == ''
         env:
           PGP_SECRET: ${{ secrets.PGP_SECRET }}
           PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
         run: echo $PGP_SECRET | base64 -d -i - | gpg --import
-
       - name: Import signing key and strip passphrase
         if: env.PGP_SECRET != '' && env.PGP_PASSPHRASE != ''
         env:
@@ -53,4 +51,8 @@ jobs:
         env:
           SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
           SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-        run: sbt publishSigned sonaRelease
+          PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
+        run: |
+          ./mill core.jvm.publish
+          ./mill core.native.publish
+          ./mill cli.publish

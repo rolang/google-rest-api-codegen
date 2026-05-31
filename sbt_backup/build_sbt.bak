@@ -40,34 +40,30 @@ lazy val noPublish = Seq(
   publish / skip := true
 )
 
-val sttpClient4Version = "4.0.13"
+val sttpClient4Version = "4.0.23"
 
-val zioVersion = "2.1.23"
+val zioVersion = "2.1.26"
 
-val zioJsonVersion = "0.8.0"
+val zioJsonVersion = "0.9.1"
 
 val jsoniterVersion = "2.38.12"
 
-val munitVersion = "1.2.1"
+val munitVersion = "1.3.0"
 
 val upickleVersion = "4.4.3"
 
-addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
+addCommandAlias("fmt", "all scalafmtSbt scalafmt Test/scalafmt")
 
 lazy val root = (project in file("."))
   .aggregate(
-    core.native,
-    core.jvm,
-    exampleJsoniterJson.native,
-    exampleJsoniterJson.jvm,
-    cli
+    (core.projectRefs ++ exampleJsoniterJson.projectRefs ++ Seq(LocalProject("cli")) ++ testProjects.componentProjects
+      .map(p => LocalProject(p.id))) *
   )
-  .aggregate(testProjects.componentProjects.map(p => LocalProject(p.id)) *)
   .settings(noPublish)
 
 // for supporting code inspection / testing of generated code via test_gen.sh script
 lazy val testLocal = (project in file("test-local"))
-  .dependsOn(exampleJsoniterJson.jvm)
+  .dependsOn(LocalProject("exampleJsoniterJson"))
   .settings(
     libraryDependencies ++= Seq(
       "com.softwaremill.sttp.client4" %% "core" % sttpClient4Version,
@@ -79,8 +75,7 @@ lazy val testLocal = (project in file("test-local"))
   )
   .settings(noPublish)
 
-lazy val core = crossProject(JVMPlatform, NativePlatform)
-  .in(file("modules/core"))
+lazy val core = (projectMatrix in file("modules/core"))
   .settings(publishSettings)
   .settings(
     name := "gcp-codegen",
@@ -88,24 +83,25 @@ lazy val core = crossProject(JVMPlatform, NativePlatform)
   )
   .settings(
     libraryDependencies ++= Seq(
-      "com.lihaoyi" %%% "upickle" % upickleVersion
+      "com.lihaoyi" %% "upickle" % upickleVersion
     )
   )
+  .jvmPlatform(scalaVersions = Seq("3.8.3"))
+  .nativePlatform(scalaVersions = Seq("3.8.3"))
 
 lazy val cli = project
   .in(file("modules/cli"))
-  .aggregate(core.native)
-  .dependsOn(core.native)
+  .aggregate(LocalProject("coreNative"))
+  .dependsOn(LocalProject("coreNative"))
   .enablePlugins(ScalaNativePlugin)
   .settings(publishSettings)
   .settings(
     name := "gcp-codegen-cli",
     moduleName := "gcp-codegen-cli",
-    nativeConfig := nativeConfig.value.withMultithreading(false)
+    nativeConfig ~= { _.withMultithreading(false) }
   )
 
-lazy val exampleJsoniterJson = crossProject(JVMPlatform, NativePlatform)
-  .in(file("modules/example-jsoniter-json"))
+lazy val exampleJsoniterJson = (projectMatrix in file("modules/example-jsoniter-json"))
   .settings(noPublish)
   .settings(
     name := "example-jsoniter-json",
@@ -117,6 +113,8 @@ lazy val exampleJsoniterJson = crossProject(JVMPlatform, NativePlatform)
       "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % jsoniterVersion % "compile-internal"
     )
   )
+  .jvmPlatform(scalaVersions = Seq("3.8.3"))
+  .nativePlatform(scalaVersions = Seq("3.8.3"))
 
 def dependencyByConfig(httpSource: String, jsonCodec: String, arrayType: String): Seq[ModuleID] = {
   (httpSource match {
@@ -182,7 +180,7 @@ lazy val testProjects: CompositeProject = new CompositeProject {
 }
 
 lazy val cliBinFile: File = {
-  val cliTarget = new File("modules/cli/target/bin")
+  val cliTarget = new File("target/bin")
 
   def normalise(s: String) = s.toLowerCase.replaceAll("[^a-z0-9]+", "")
   val props = sys.props.toMap
@@ -208,8 +206,8 @@ lazy val cliBinFile: File = {
 }
 
 lazy val buildCliBinary = taskKey[File]("")
-buildCliBinary := {
-  val built = (cli / Compile / nativeLinkReleaseFast).value
+buildCliBinary := Def.uncached {
+  val built = java.io.File((cli / Compile / nativeLinkReleaseFast).value.toString.replace(s"$${OUT}", "target/out"))
   IO.copyFile(built, cliBinFile)
   cliBinFile
 }
@@ -231,11 +229,11 @@ def codegenTask(
     val outSrcDir = outDir / "scala"
 
     @scala.annotation.tailrec
-    def listFilesRec(dir: List[File], res: List[File]): List[File] =
+    def listFilesRec(dir: List[File], res: Seq[File]): Seq[File] =
       dir match {
         case x :: xs =>
           val (dirs, files) = IO.listFiles(x).toList.partition(_.isDirectory())
-          listFilesRec(dirs ::: xs, files ::: res)
+          listFilesRec(dirs ::: xs, files ++ res)
         case Nil => res
       }
 
@@ -267,6 +265,6 @@ def codegenTask(
 
     val files = listFilesRec(List(outDir), Nil)
     IO.delete(outDir / ".scala-build")
-    files
+    files.toSeq
   }
 }

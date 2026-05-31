@@ -80,8 +80,7 @@ def generateBySpec(
   val resourcesPath = config.outDir / resourcesSplit
   val schemasPath = config.outDir / schemasPkg.split('.')
   val commonCodecsObj = "codecs"
-  val commonCodecsPkg = s"$schemasPkg.$commonCodecsObj"
-  val commonCodecsPath = schemasPath / s"$commonCodecsObj.scala"
+  val commonCodecsPkg = s"${config.outPkg}.$commonCodecsObj"
 
   for {
     _ <- Future {
@@ -143,7 +142,26 @@ def generateBySpec(
                         Some(e.description)
                       )}  case `${e.location}$locationPostfix` extends Endpoint("${e.location}", uri"${e.endpointUrl}")""".stripMargin
                   )
-                  .mkString("\n")
+                  .mkString("\n"),
+                "",
+                config.jsonCodec match
+                  case _: JsonCodec.Jsoniter =>
+                    s"""|object $commonCodecsObj:
+                        |  import com.github.plokhotnyuk.jsoniter_scala.core.JsonValueCodec
+                        |  import com.github.plokhotnyuk.jsoniter_scala.macros.JsonCodecMaker
+                        |
+                        |""".stripMargin + (
+                      config.arrayType match
+                        case gcp.codegen.GeneratorConfig.ArrayType.List =>
+                          "  given JsonValueCodec[List[String]] = JsonCodecMaker.make"
+                        case gcp.codegen.GeneratorConfig.ArrayType.Vector =>
+                          "  given JsonValueCodec[Vector[String]] = JsonCodecMaker.make"
+                        case gcp.codegen.GeneratorConfig.ArrayType.Array =>
+                          "  given JsonValueCodec[Array[String]] = JsonCodecMaker.make"
+                        case ArrayType.ZioChunk =>
+                          "  given JsonValueCodec[zio.Chunk[String]] = JsonCodecMaker.make"
+                    )
+                  case _ => ""
               ).mkString("\n")
             )
             List(path.toFile())
@@ -236,7 +254,8 @@ def generateBySpec(
                          pkg = schemasPkg,
                          jsonCodec = config.jsonCodec,
                          hasProps = p => specs.hasProps(p),
-                         arrType = config.arrayType
+                         arrType = config.arrayType,
+                         commonCodecsPkg = commonCodecsPkg
                        )
                      else
                        // create a type alias for objects without properties
@@ -404,7 +423,8 @@ def schemasCode(
     pkg: String,
     jsonCodec: JsonCodec,
     hasProps: SchemaPath => Boolean,
-    arrType: ArrayType
+    arrType: ArrayType,
+    commonCodecsPkg: String
 ): String = {
   def enums =
     schema.properties.collect:
@@ -463,8 +483,9 @@ def schemasCode(
     jsonCodec match {
       case JsonCodec.ZioJson     => "import zio.json.*"
       case _: JsonCodec.Jsoniter =>
-        """|import com.github.plokhotnyuk.jsoniter_scala.core.*
-           |import com.github.plokhotnyuk.jsoniter_scala.macros.*""".stripMargin
+        s"""|import com.github.plokhotnyuk.jsoniter_scala.core.*
+           |import com.github.plokhotnyuk.jsoniter_scala.macros.*
+           |import ${commonCodecsPkg}.given""".stripMargin
     },
     toSchemaClass(schema)
   ).mkString("\n")

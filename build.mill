@@ -111,8 +111,7 @@ object cli extends ScalaNativeModule with Publishable with SbtModule {
 
 object exampleJsoniterJson extends Module {
   trait ExampleModule extends ScalaModule with SbtModule {
-    def moduleDir = os.pwd / "modules" / "example-jsoniter-json"
-
+    override def moduleDir: Path = super.moduleDir / ".." / ".." / "modules" / "example-jsoniter-json"
     def scalaVersion = scalaVer
     override def mvnDeps = Task { Seq(mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:$jsoniterVer") }
     override def compileMvnDeps = Task {
@@ -189,9 +188,10 @@ trait TestModule extends Cross.Module5[String, String, String, String, String] w
   override def mvnDeps: T[Seq[Dep]] = Task {
     Seq(mvn"com.softwaremill.sttp.client4::core:$sttpClient4Ver") ++
       (jsonCodec match {
-        case "Jsoniter" => Seq(mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:$jsoniterVer")
-        case "ZioJson"  => Seq(mvn"dev.zio::zio-json:$zioJsonVer")
-        case other      => sys.error(s"Unknown jsonCodec: $other")
+        case "Jsoniter" =>
+          Seq(mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:$jsoniterVer")
+        case "ZioJson" => Seq(mvn"dev.zio::zio-json:$zioJsonVer")
+        case other     => sys.error(s"Unknown jsonCodec: $other")
       }) ++
       (arrayType match {
         case "ZioChunk" => Seq(mvn"dev.zio::zio:$zioVer")
@@ -210,10 +210,14 @@ trait TestModule extends Cross.Module5[String, String, String, String, String] w
     val basePkg = s"gcp.$apiName.$apiVersion.${httpSource}_${jsonCodec}_${arrayType}".toLowerCase()
     val outSrcDir = dest / "scala"
     val specFile =
-      os.pwd / "modules" / "test-resources" / "src" / "main" / "resources" / s"${apiName}_${apiVersion}.json"
+      // os.pwd / "modules" / "test-resources" / "src" / "main" / "resources" / s"${apiName}_${apiVersion}.json"
+      s"/home/roman/projects/rolang/google-api-codegen/modules/test-resources/src/main/resources/${apiName}_${apiVersion}.json"
+
+    val cliBin = buildCliBinary()
+
     os.makeDir.all(outSrcDir)
     os.proc(
-      cliBinPath,
+      cliBin.path,
       s"-specs=$specFile",
       s"-out-dir=$outSrcDir",
       s"-out-pkg=$basePkg",
